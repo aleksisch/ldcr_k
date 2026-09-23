@@ -53,7 +53,7 @@ bool Solver::uses(Encoding encoding) const
     case Encoding::Fc:
         return options_.mode == Mode::Lfc;
     case Encoding::D:
-        return options_.mode == Mode::Ldc;
+        return options_.mode == Mode::Ldc || options_.mode == Mode::Ldcr;
     }
     return false;
 }
@@ -97,10 +97,12 @@ bool Solver::reach(const std::string& function, CtxId ctx)
     return methodCtx_[function].insert(ctx).second;
 }
 
+/// Plain flow: dispatch-instance tags are dropped (they only matter in `this`).
 bool Solver::addAll(ObjSet& into, const ObjSet& from)
 {
     const std::size_t before = into.size();
-    into.insert(from.begin(), from.end());
+    for (const Obj& object : from)
+        into.insert(Obj{object.node, object.ctx, object.offset});
     return into.size() != before;
 }
 
@@ -175,6 +177,8 @@ bool Solver::applyIntra(const Edge& edge, CtxId ctx)
     }
     case Label::Store: // src --store[f]--> base
     {
+        if (options_.mode == Mode::Ldcr && isSyntheticField(edge.field))
+            return storeInstance(edge, ctx);
         const ObjSet bases = pts_[dst];
         for (const Obj& object : bases)
             changed |= addAll(fieldSet(object, edge.field), pts_[src]);
@@ -182,11 +186,53 @@ bool Solver::applyIntra(const Edge& edge, CtxId ctx)
     }
     case Label::Load: // base --load[f]--> dst
     {
+        if (options_.mode == Mode::Ldcr && isSyntheticField(edge.field))
+            return loadInstance(edge, ctx);
         const ObjSet bases = pts_[src];
         for (const Obj& object : bases)
             changed |= addAll(pts_[dst], readField(object, edge.field));
         break;
     }
+    }
+    return changed;
+}
+
+/// Ldcr. Caller: a_i --store[p_i] ⟦ĉ_c⟧--> r opens instance (c, ctx). Callee:
+/// ret --store[ret]--> this writes the instance tagged on each receiver in `this`.
+bool Solver::storeInstance(const Edge& edge, CtxId ctx)
+{
+    const ObjSet bases = pts_[{edge.dst, nodeCtx(edge.dst, ctx)}];
+    const ObjSet& values = pts_[{edge.src, nodeCtx(edge.src, ctx)}];
+    bool changed = false;
+    for (const Obj& object : bases)
+    {
+        const bool caller = edge.dir == CallDir::BoxEnter;
+        const CallSiteId site = caller ? edge.callSite : object.tagSite;
+        const CtxId instanceCtx = caller ? ctx : object.tagCtx;
+        if (site == kNoCallSite)
+            continue; // `this` reached by a direct call: its arguments flow by assign edges
+        changed |= addAll(instanceHeap_[{object.node, object.ctx, edge.field, site, instanceCtx}], values);
+    }
+    return changed;
+}
+
+/// Ldcr. Callee: this --load[p_i]--> p_i reads the instance tagged on the receiver.
+/// Caller: r --load[ret] ⟦č_c⟧--> x reads instance (c, ctx).
+bool Solver::loadInstance(const Edge& edge, CtxId ctx)
+{
+    const ObjSet bases = pts_[{edge.src, nodeCtx(edge.src, ctx)}];
+    ObjSet& into = pts_[{edge.dst, nodeCtx(edge.dst, ctx)}];
+    bool changed = false;
+    for (const Obj& object : bases)
+    {
+        const bool caller = edge.dir == CallDir::BoxExit;
+        const CallSiteId site = caller ? edge.callSite : object.tagSite;
+        const CtxId instanceCtx = caller ? ctx : object.tagCtx;
+        if (site == kNoCallSite)
+            continue;
+        auto it = instanceHeap_.find({object.node, object.ctx, edge.field, site, instanceCtx});
+        if (it != instanceHeap_.end())
+            changed |= addAll(into, it->second);
     }
     return changed;
 }
@@ -207,7 +253,13 @@ bool Solver::applyCall(const Edge& edge, CtxId callerCtx)
                 continue;
             recordCall(edge.callSite, callerCtx, graph_.nodes()[edge.dst].function);
             changed |= reach(graph_.nodes()[edge.dst].function, calleeCtx);
-            changed |= pts_[{edge.dst, calleeCtx}].insert(receiver).second;
+            Obj passed{receiver.node, receiver.ctx, receiver.offset};
+            if (options_.mode == Mode::Ldcr) // closes the instance (c, callerCtx): tag it
+            {
+                passed.tagSite = edge.callSite;
+                passed.tagCtx = callerCtx;
+            }
+            changed |= pts_[{edge.dst, calleeCtx}].insert(passed).second;
         }
     }
     else if (edge.dir == CallDir::Enter) // actual (caller) → formal (callee)
@@ -330,6 +382,20 @@ std::size_t Solver::reachedFunctionCount() const
     for (const auto& [function, contexts] : methodCtx_)
         count += !function.empty() && !contexts.empty();
     return count;
+}
+
+Solver::ContextFacts Solver::contextFacts() const
+{
+    ContextFacts facts;
+    for (const auto& [var, objects] : pts_)
+    {
+        if (graph_.nodes()[var.first].kind != NodeKind::Var || objects.empty())
+            continue;
+        auto& into = facts[{var.first, contexts_[var.second]}];
+        for (const Obj& object : objects)
+            into.insert({object.node, contexts_[object.ctx]});
+    }
+    return facts;
 }
 
 std::size_t Solver::methodContextCount() const

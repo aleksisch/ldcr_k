@@ -1,6 +1,38 @@
-# Results — phase 1 (L_DC_k for C++)
+# Results — L_DC_k and L_DCR_k for C++
 
-Evaluation of M5 (PLAN.md §4). Three analyses run on the same LDGraph and the same memory
+**Phase 2 summary (below): L_DCR_k = kCFA fact by fact on every test and program, k = 0…4,
+and it removes all of L_DC's cost blow-up.** The phase-1 sections follow unchanged.
+
+## Phase 2: L_DCR_k
+
+`-ldc-mode=ldcr` (PLAN.md §7): L_R's DP-C1 / DP-C2 as dispatch instances (call site, caller
+context) on the receiver's parameter / return fields. Measured with `ldc -ldc-eval`:
+
+- **Equality with kCFA, fact by fact**: for every (variable, context), the same set of
+  (object, heap context) — 0 differing pairs on all 6 unit tests and all 3 programs, k = 0…4.
+  Negative control (L_DC in place of L_DCR): 2 (`fig8`), 10 (`eq15`), 2613 (`expr`, k = 2).
+- Hence also equal Σ|pts|, virtual call edges, polymorphic sites, (function, context) pairs.
+- **Cost** (ms, one run, same naive solver):
+
+  | program | k | kCFA | L_DCR | L_DC | (fn, ctx): kCFA = L_DCR / L_DC |
+  |---|---:|---:|---:|---:|---|
+  | expr | 2 | 89 | 113 | 2243 | 190 / 440 |
+  | expr | 3 | 42 | 60 | 22 681 | 210 / 1640 |
+  | expr | 4 | 45 | 63 | 137 355 | 240 / 4909 |
+  | shapes | 4 | 60 | 68 | 367 | 332 / 576 |
+
+  L_DCR costs 10–50 % more than kCFA here (extra tagged facts in `this`); L_DC's spurious
+  objects create spurious contexts and grow with k — finding 5 below, now confirmed: precision
+  pays for itself.
+- **What this does and does not show.** The solver is inclusion-based, and in that form the
+  equality is close to by construction (proof sketch in PLAN.md §7). It shows that the
+  regularised L_DCR_k with *one shared context* is the right target — L_DC_k is not, on real
+  patterns (visitors). It does not yet show the CFL side (path ↔ derivation) or give a
+  demand-driven solver; that is the next step.
+
+# Phase 1
+
+Evaluation of M5 (PLAN.md §4), before phase 2. Three analyses run on the same LDGraph and the same memory
 model, for k = 0, 1, 2:
 
 - **kCFA** — the oracle (paper Fig. 1): per-receiver dispatch, call-string contexts, heap

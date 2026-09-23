@@ -10,5 +10,6 @@ Naming:
 Each query lists the expected points-to set per mode, where known:
 - `kcfa` — the reference kCFA (paper Fig. 1 rules), heap context k−1;
 - `lfc`  — baseline L_FC_k (virtual calls wired from Andersen targets as plain edges);
-- `ldc`  — L_DC_k (this project, phase 1).
+- `ldc`  — L_DC_k (this project, phase 1);
+- `ldcr` — L_DCR_k (phase 2); never listed: it must equal `kcfa`.
 A mode that is absent means "same as `kcfa`".

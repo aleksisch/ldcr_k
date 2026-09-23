@@ -17,7 +17,8 @@ namespace ldc
 /// Prints one Markdown table (one row per analysis) for context depth k. kCFA is the
 /// reference: for each other analysis, "extra" counts objects it adds over kCFA and
 /// "missing" objects kCFA has and it lacks (a soundness violation). Returns the number of
-/// missing objects over all analyses.
+/// missing objects over all analyses plus the number of (variable, context) pairs where
+/// L_DCR's facts differ from kCFA's (the phase-2 hypothesis L_DCR_k = kCFA).
 std::size_t evaluate(const LDGraph& graph, SVF::PointerAnalysis& andersen, unsigned k,
                      std::ostream& os);
 

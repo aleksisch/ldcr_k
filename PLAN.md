@@ -12,7 +12,7 @@ Phase 1 (this plan, in detail): **L_DC_k = L_D ∩ C_k**, where
 L_D ∩ regular = one context-free language, so the problem is decidable and polynomial
 for fixed k.
 
-Phase 2 (later, sketched only): add L_R → **L_DCR_k**.
+Phase 2: add L_R → **L_DCR_k** (§7; implemented, equals kCFA on all programs).
 
 ---
 
@@ -22,7 +22,7 @@ Phase 2 (later, sketched only): add L_R → **L_DCR_k**.
 |---|---|---|
 | L_FC (baseline, = SVF `CFLAlias`, Soot `DemandCSPointsTo`; SVF's Andersen behaves the same, see §6) | fields, contexts | virtual calls: receiver objects cross to the wrong target (paper Fig. 5) |
 | **L_DC_k** (phase 1) | + receiver → only its own target (Lemma 3), sound parameter passing (Lemma 4) | dispatch excursion may return under the wrong context (paper Eq. 15) |
-| L_DCR_k (phase 2) | + excursion returns the same way (DP-C1, DP-C2) | — (target: equal to kCFA) |
+| L_DCR_k (phase 2) | + excursion returns the same way (DP-C1, DP-C2) | — (measured: equal to kCFA, §7) |
 
 L_DC is sound but not precise (paper Def. 2, Lemma 4). That is fine for phase 1: it already
 beats L_FC on the Fig. 5 case, and the Eq. 15 case becomes the motivating test for phase 2.
@@ -319,18 +319,42 @@ Findings from M5 (numbers in `RESULTS.md`):
 
 ---
 
-## 7. Phase 2 — L_R (sketch)
+## 7. Phase 2 — L_R → L_DCR_k  — status: **implemented** (`-ldc-mode=ldcr`)
 
-- Add boxed labels `⟦ĉ⟧` / `⟦č⟧` on the excursion edges (`r → r#c` and `r#c → this`).
-- With the **single shared context** of C_k, the L_R checks become state checks:
-  - DP-C1: excursion closes at the same call site → match `⟦ĉ_c⟧` with `⟦č_c⟧`;
-  - DP-C2: returns "the same way" → the context state after the excursion equals the one before.
-- Target theorem: L_DCR_k with one shared context = kCFA with the same k
-  (heap context k−1). Validate with `KCFA` on all tests, then attempt a proof by
-  simulation in both directions.
+Same LDGraph as L_DC (encoding `D`); only the solver differs. With the **single shared
+context** of C_k, L_R's conditions become checks on solver state:
 
-Naive independent k-limiting of L_C and L_R is expected to **differ** from kCFA
-(heap depth k vs k−1; two unsynchronised truncations). Worth one experiment to confirm.
+| paper (Eq. 16, 17) | solver (`Solver::storeInstance` / `loadInstance`, dispatch in `applyCall`) |
+|---|---|
+| `a_i --store[p_i] ⟦ĉ_c⟧--> r` opens a dispatch path in context C | the argument goes to O.p_i **of instance (c, C)**, for each O ∈ pts(r, C) |
+| `r --assign ⟦č_c⟧--> r#c --dispatch[t] ĉ_c--> this` closes it | the receiver fact entering `this` in ⌈c :: C⌉_k is tagged (c, C) |
+| DP-C1: closes at the same site c | `this --load[p_i]-->` reads only the instance of the tag: same c … |
+| DP-C2: O pointed to by r under the same context | … and same C |
+| returns (mirror) | `ret --store[ret]--> this` writes the tag's instance; `r --load[ret] ⟦č_c⟧--> x` in C reads (c, C) |
+
+Tags live only in `this` of the dispatched method; every other edge drops them.
+
+**Result:** L_DCR_k = kCFA **fact by fact** — the same (object, heap context) set for every
+(variable, context) — on all unit tests and all evaluation programs for k = 0…4
+(`ldc -ldc-eval` checks it; CTest `<program>.eval.k<k>` fails otherwise). A negative control
+(comparing L_DC instead) reports 2 / 10 / 2613 differing pairs on `fig8` / `eq15` / `expr`.
+
+**Proof sketch** (inclusion form, induction on derivations; all other rules are shared):
+- kCFA ⊆ L_DCR: an [I-VCall] firing for (c, C, O ∈ pts(r, C), m′ = dispatch(c, type O)) adds
+  O to this^m′, pts(a_i, C) to p_i^m′ and ret^m′ to x in C, with callee context ⌈c :: C⌉_k.
+  L_DCR derives the same: dispatch adds O^(c,C) to this^m′; storeInstance puts pts(a_i, C)
+  into O.p_i@(c, C); loadInstance moves it to p_i^m′; the return goes through O.ret@(c, C).
+- L_DCR ⊆ kCFA: O.p_i@(c, C) is written only from pts(a_i, C) with O ∈ pts(r, C), and read only
+  in m′ through the tag (c, C), which exists only if dispatch fired for O at (c, C) — exactly
+  the premise of [I-VCall]. Returns are symmetric. Receivers of unknown type are dropped by both.
+
+So in inclusion form the equality is close to *by construction*. The open part — the
+research question — is the CFL side: that this solver computes exactly the paths accepted by
+L_D ∩ C_k ∩ L_R_k with the shared-context regularisation (path ↔ derivation), and a
+demand-driven (single-query) solver for it, which is where CFL pays off over kCFA (§8).
+
+Not done: the planned experiment with **independent** k-limiting of L_C and L_R (expected to
+differ from kCFA).
 
 ---
 

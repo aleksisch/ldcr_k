@@ -32,6 +32,7 @@ struct Row
     std::set<NodeId> untyped;
     double millis = 0;
     bool hasContexts = true;
+    Solver::ContextFacts facts; ///< kCFA and L_DCR only
 };
 
 bool isVariable(const Node& node)
@@ -57,7 +58,23 @@ Row runSolver(const LDGraph& graph, Mode mode, unsigned k, const char* name)
     row.callEdges = solver.virtualCallEdges();
     row.callEdgeContexts = solver.virtualCallEdgeContextCount();
     row.untyped = solver.untypedReceivers();
+    if (mode == Mode::Kcfa || mode == Mode::Ldcr)
+        row.facts = solver.contextFacts();
     return row;
+}
+
+/// (variable, context) pairs whose facts differ.
+std::size_t countDifferences(const Solver::ContextFacts& a, const Solver::ContextFacts& b)
+{
+    std::size_t differences = 0;
+    for (const auto& [key, objects] : a)
+    {
+        auto it = b.find(key);
+        differences += it == b.end() || it->second != objects;
+    }
+    for (const auto& entry : b)
+        differences += a.count(entry.first) == 0;
+    return differences;
 }
 
 /// SVF Andersen: every function analysed, no contexts. Its virtual call edges are the `Fc`
@@ -102,10 +119,14 @@ std::size_t evaluate(const LDGraph& graph, SVF::PointerAnalysis& andersen, unsig
 {
     std::vector<Row> rows;
     rows.push_back(runSolver(graph, Mode::Kcfa, k, "kCFA"));
+    rows.push_back(runSolver(graph, Mode::Ldcr, k, "L_DCR"));
     rows.push_back(runSolver(graph, Mode::Ldc, k, "L_DC"));
     rows.push_back(runSolver(graph, Mode::Lfc, k, "L_FC"));
     rows.push_back(andersenRow(graph, andersen));
     const Row& reference = rows.front();
+
+    // Phase 2 hypothesis: L_DCR_k = kCFA, fact by fact (per variable and context).
+    const std::size_t contextDiffs = countDifferences(rows[0].facts, rows[1].facts);
 
     std::size_t virtualSites = 0;
     for (const CallSite& site : graph.callSites())
@@ -146,7 +167,8 @@ std::size_t evaluate(const LDGraph& graph, SVF::PointerAnalysis& andersen, unsig
            << opt(row.callEdgeContexts) << " | " << opt(row.untyped.size()) << " | "
            << (row.hasContexts ? ms.str() : std::string("–")) << " |\n";
     }
-    os << "\n";
+    os << "\nL_DCR vs kCFA, per (variable, context): " << contextDiffs << " differing\n\n";
+    missingTotal += contextDiffs;
     return missingTotal;
 }
 

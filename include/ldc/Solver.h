@@ -1,4 +1,4 @@
-// Solver — points-to on LDGraph with k-limited call-string contexts (M2, M3, M4).
+// Solver — points-to on LDGraph with k-limited call-string contexts (M2–M4, phase 2).
 //
 // Contexts follow PLAN.md §2.3 (C_k as one shared context, kCFA's discipline):
 //   entering a call at c:  ctx  →  ⌈c :: ctx⌉_k
@@ -22,6 +22,15 @@
 //         The boxed ⟦ĉ⟧ / ⟦č⟧ are ε for C_k, so these are intra-procedural edges.
 //         Precision loss vs kCFA (paper Eq. 13, 15): the field p_i of ⟨O, h⟩ is shared by
 //         all call sites and all caller contexts in which O is the receiver.
+//   Ldcr  L_DCR_k = L_D ∩ C_k ∩ L_R, same edges. With one shared context, L_R's conditions
+//         become state checks. The boxed ⟦ĉ_c⟧ of `a_i --store[p_i]--> r` in caller context C
+//         opens a dispatch instance (c, C): the argument goes to field p_i of O *for (c, C)*.
+//         `r#c --dispatch[t] ĉ_c--> this` in the same C closes it (the paper's ⟦č_c⟧ on
+//         r → r#c): the receiver fact in `this` carries the tag (c, C), and
+//         `this --load[p_i]-->` reads only that instance — DP-C1 (same site) and DP-C2 (same
+//         context). Returns mirror this: `ret --store[ret]--> this` writes the instance of the
+//         tag, the caller's `r --load[ret] ⟦č_c⟧--> x` in C reads (c, C). Tags live only in
+//         `this` of the dispatched method: every other edge drops them.
 
 #pragma once
 
@@ -42,6 +51,7 @@ enum class Mode
     Lfc,
     Kcfa,
     Ldc,
+    Ldcr,
 };
 
 struct SolverOptions
@@ -63,6 +73,13 @@ public:
     /// Objects (LDGraph node ids) that node `n` may point to, in any context.
     std::set<NodeId> pts(NodeId n) const;
 
+    using CallString = std::vector<CallSiteId>; ///< most recent call site first
+    /// (var, ctx) -> {(object, heap ctx)}, contexts as call strings; tags and offsets dropped.
+    using ContextFacts =
+        std::map<std::pair<NodeId, CallString>, std::set<std::pair<NodeId, CallString>>>;
+    /// Context-sensitive facts of variables, for comparing analyses.
+    ContextFacts contextFacts() const;
+
     std::size_t iterations() const { return iterations_; }
     std::size_t contextCount() const { return contexts_.size(); }
     /// Number of (function, context) pairs analysed.
@@ -78,7 +95,7 @@ public:
     const std::set<NodeId>& untypedReceivers() const { return untypedReceivers_; }
 
 private:
-    using Ctx = std::vector<CallSiteId>; ///< most recent call site first
+    using Ctx = CallString;
     using CtxId = std::uint32_t;
     /// Object with heap context, and an offset for interior pointers (&O.f, gep).
     struct Obj
@@ -86,13 +103,20 @@ private:
         NodeId node;
         CtxId ctx;
         FieldId offset = 0;
+        /// Ldcr: the dispatch instance (call site, caller context) that passed this receiver
+        /// to `this`; kNoCallSite elsewhere.
+        CallSiteId tagSite = kNoCallSite;
+        CtxId tagCtx = 0;
         bool operator<(const Obj& other) const
         {
-            return std::tie(node, ctx, offset) < std::tie(other.node, other.ctx, other.offset);
+            return std::tie(node, ctx, offset, tagSite, tagCtx) <
+                   std::tie(other.node, other.ctx, other.offset, other.tagSite, other.tagCtx);
         }
     };
     using Var = std::pair<NodeId, CtxId>;                 ///< node in a context
     using Field = std::tuple<NodeId, CtxId, FieldId>;     ///< field of a heap object
+    /// Ldcr: synthetic field (p_i / ret) of a heap object, per dispatch instance (site, ctx).
+    using InstanceField = std::tuple<NodeId, CtxId, FieldId, CallSiteId, CtxId>;
     /// Field `field` of an object seen at `offset` (interior pointer).
     static FieldId shift(FieldId offset, FieldId field);
     using ObjSet = std::set<Obj>;
@@ -111,6 +135,8 @@ private:
     ObjSet& fieldSet(const Obj& object, FieldId field);
 
     bool applyIntra(const Edge& edge, CtxId ctx);
+    bool storeInstance(const Edge& edge, CtxId ctx);
+    bool loadInstance(const Edge& edge, CtxId ctx);
     bool uses(Encoding encoding) const;
     bool applyCall(const Edge& edge, CtxId callerCtx);
     bool applyVirtualCall(CallSiteId site, CtxId callerCtx);
@@ -123,6 +149,7 @@ private:
 
     std::map<Var, ObjSet> pts_;
     std::map<Field, ObjSet> heap_;
+    std::map<InstanceField, ObjSet> instanceHeap_;
     std::map<std::string, std::set<CtxId>> methodCtx_;
 
     /// Edges grouped by the function whose contexts drive them.
