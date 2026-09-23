@@ -11,7 +11,10 @@ find_package(SVF CONFIG REQUIRED)
 add_executable(ldc
   src/main.cpp
   src/LDGraph.cpp
-  src/Builder.cpp)
+  src/Builder.cpp
+  src/Names.cpp
+  src/Solver.cpp
+  src/Check.cpp)
 target_include_directories(ldc PRIVATE include)
 target_link_libraries(ldc PRIVATE SVF::SvfLLVM SVF::SvfCore)
 

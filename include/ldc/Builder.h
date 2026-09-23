@@ -13,6 +13,7 @@
 
 #include <cstddef>
 #include <iosfwd>
+#include <unordered_set>
 
 namespace SVF
 {
@@ -27,9 +28,10 @@ namespace ldc
 struct BuildStats
 {
     std::size_t variantGeps = 0;   ///< gep with a variable offset → field kAnyField
-    std::size_t escapingGeps = 0;  ///< gep result used other than as a load/store address
+    std::size_t escapingGeps = 0;  ///< gep result used as a value (e.g. vptr stored by a ctor)
     std::size_t skippedStmts = 0;  ///< statements involving only filtered nodes
     std::size_t indirectEdges = 0; ///< call/return edges added from the Andersen call graph
+    std::unordered_set<SvfId> escapingGepIds; ///< modelled as `base --assign--> gep` (offset dropped)
 
     void print(std::ostream& os) const;
 };

@@ -5,9 +5,14 @@
 //
 // Options (parsed by SVF's option parser, so they coexist with SVF's own):
 //   -ldc-dot=<file>     write LDGraph to a Graphviz file
+//   -ldc-src=<file>     C++ source, for `// label` object names
+//   -ldc-expect=<json>  check the queries in this file; exit 1 on failure
+//   -ldc-andersen       compare every variable's PTS with SVF Andersen; exit 1 on mismatch
 
 #include "ldc/Builder.h"
+#include "ldc/Check.h"
 #include "ldc/LDGraph.h"
+#include "ldc/Solver.h"
 
 #include "SVF-LLVM/LLVMUtil.h"
 #include "SVF-LLVM/SVFIRBuilder.h"
@@ -26,6 +31,9 @@ namespace
 {
 
 const Option<std::string> DotOut("ldc-dot", "Write LDGraph to this Graphviz file", "");
+const Option<std::string> SourceFile("ldc-src", "C++ source file, for object labels", "");
+const Option<std::string> ExpectFile("ldc-expect", "Expected-results JSON to check", "");
+const Option<bool> CompareAndersen("ldc-andersen", "Compare PTS with SVF Andersen", false);
 
 } // namespace
 
@@ -54,6 +62,27 @@ int main(int argc, char** argv)
     graph.printSummary(std::cout);
     stats.print(std::cout);
 
+    ldc::Solver solver(graph);
+    solver.solve();
+    std::cout << "Solver: fixpoint after " << solver.iterations() << " rounds (k = 0)\n";
+
+    bool ok = true;
+    if (CompareAndersen())
+    {
+        std::size_t mismatches =
+            ldc::compareWithAndersen(graph, solver, *ander, std::cout);
+        std::cout << "Andersen comparison: " << mismatches << " mismatching variables\n";
+        ok &= mismatches == 0;
+    }
+    if (!ExpectFile().empty())
+    {
+        ldc::ExpectResult r = ldc::checkExpected(ExpectFile(), SourceFile(), 0, "lfc",
+                                                 graph, solver, std::cout);
+        std::cout << "Expected: " << r.passed << " passed, " << r.failed << " failed, " << r.skipped
+                  << " skipped (other k)\n";
+        ok &= r.failed == 0;
+    }
+
     if (!DotOut().empty())
     {
         std::ofstream dot(DotOut());
@@ -64,5 +93,5 @@ int main(int argc, char** argv)
     AndersenWaveDiff::releaseAndersenWaveDiff();
     SVFIR::releaseSVFIR();
     LLVMModuleSet::releaseLLVMModuleSet();
-    return 0;
+    return ok ? 0 : 1;
 }

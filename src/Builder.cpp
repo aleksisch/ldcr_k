@@ -59,6 +59,8 @@ public:
     LDGraph run()
     {
         collectGeps();
+        findEscapingGeps();
+        addEscapingGeps();
         addAddr();
         addCopies();
         addMultiOperand<PhiStmt>(SVFStmt::Phi);
@@ -68,7 +70,6 @@ public:
         addDirectCalls();
         addDirectReturns();
         addIndirectCalls();
-        countEscapingGeps();
         return std::move(graph_);
     }
 
@@ -173,9 +174,19 @@ private:
         return {base, field};
     }
 
-    void countEscapingGeps()
+    /// A gep result used as a value (stored, copied, passed) — in C++ mostly the vptr
+    /// `&vtable[2]` stored by constructors. LDGraph has no "pointer to field" values, so it
+    /// gets the objects of its base (the field offset is dropped). This is what M4 reads
+    /// to recover dynamic types: an object's field 0 holds its class's vtable.
+    void addEscapingGeps()
     {
-        std::unordered_set<SvfId> escaping;
+        for (SvfId id : stats_.escapingGepIds)
+            edge(gepDef_.at(id).first, pag_.getGNode(id), Label::Assign);
+    }
+
+    void findEscapingGeps()
+    {
+        std::unordered_set<SvfId>& escaping = stats_.escapingGepIds;
         auto check = [&](const SVFVar* var) {
             if (var != nullptr && gepDef_.count(var->getId()) != 0)
                 escaping.insert(var->getId());

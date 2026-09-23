@@ -20,7 +20,7 @@ Phase 2 (later, sketched only): add L_R → **L_DCR_k**.
 
 | | What it fixes | What it still gets wrong |
 |---|---|---|
-| L_FC (baseline, = SVF `CFLAlias`, Soot `DemandCSPointsTo`) | fields, contexts | virtual calls: receiver objects cross to the wrong target (paper Fig. 5) |
+| L_FC (baseline, = SVF `CFLAlias`, Soot `DemandCSPointsTo`; SVF's Andersen behaves the same, see §6) | fields, contexts | virtual calls: receiver objects cross to the wrong target (paper Fig. 5) |
 | **L_DC_k** (phase 1) | + receiver → only its own target (Lemma 3), sound parameter passing (Lemma 4) | dispatch excursion may return under the wrong context (paper Eq. 15) |
 | L_DCR_k (phase 2) | + excursion returns the same way (DP-C1, DP-C2) | — (target: equal to kCFA) |
 
@@ -221,7 +221,7 @@ Three purposes:
 | Multiple inheritance, `this` adjustment thunks | **out of scope**; tests use single inheritance; detect and report unsupported sites |
 | Function pointers (no receiver) | handled like static calls with Andersen targets (L_FC style); no `dispatch[t]` |
 | Pointer-to-member-function calls | out of scope; report |
-| Object type recovery | `new T(...)` = `operator new` + ctor `T::T`; take `T` from the ctor call on the returned pointer |
+| Object type recovery | read the vtable stored in the object's field 0 by its constructor (see §6); fall back to the ctor call on the returned pointer |
 | Stack / global objects with virtual methods | allocation site = `alloca` / global, type from ctor |
 | Arrays, unions, casts | inherit SVF's field model; casts = `assign` |
 | Standard library | analyse only user code first; model `operator new`, ignore `std::` bodies |
@@ -241,8 +241,19 @@ Three purposes:
   load/store: `v --store[f]--> p`, with `f` = flattened constant offset; a direct `*p` is field 0;
   a variable offset is field `*`. A gep result used as a value ("escaping gep") is counted and
   reported; in the tests these are the vptr stores in constructors.
-- **Noise** kept in LDGraph for now: vtable / typeinfo globals and function objects. The vtable
-  stores in constructors are the input for type recovery in M4.
+- **Escaping geps** (a gep result used as a value — in C++ mostly the vptr `&vtable[2]` stored by
+  constructors) are modelled as `base --assign--> gep`, dropping the offset. With that, an object's
+  field 0 holds its class's vtable.
+- **Noise** kept in LDGraph for now: vtable / typeinfo globals and function objects.
+
+Findings from M2:
+- On all five tests our k = 0 solver on LDGraph gives **exactly** SVF Andersen's PTS for every
+  variable (compared on base objects).
+- **SVF's Andersen has the paper's Fig. 5 defect.** On `fig5.cpp` it gives `this` of `E::foo` =
+  `{e1, f1}`, the same as our L_FC wiring: it passes the receiver to `this` of every target like an
+  ordinary argument. So SVF Andersen is itself an L_FC-style baseline for M5, not only a sanity check.
+- **Type recovery for M4** can read the vtable from field 0 of the object (`DynTypeOf(O)` = class of
+  the vtable in `O.field0`), instead of pattern-matching constructor calls.
 
 ---
 

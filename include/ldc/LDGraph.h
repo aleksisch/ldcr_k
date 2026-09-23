@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <iosfwd>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -83,6 +84,11 @@ public:
     /// Returns the node for an SVF id, creating it on first use.
     NodeId nodeFor(SvfId svfId, NodeKind kind, const std::string& name,
                    const std::string& function, int line);
+    std::optional<NodeId> findSvf(SvfId svfId) const
+    {
+        auto it = bySvf_.find(svfId);
+        return it == bySvf_.end() ? std::nullopt : std::optional<NodeId>(it->second);
+    }
 
     void addEdge(const Edge& edge) { edges_.push_back(edge); }
     CallSiteId addCallSite(const CallSite& callSite);

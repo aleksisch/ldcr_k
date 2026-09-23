@@ -21,7 +21,11 @@ foreach(src IN LISTS LDC_TEST_SOURCES)
     COMMENT "IR: ${name}"
     VERBATIM)
   list(APPEND LDC_TEST_IR "${ll}")
-  add_test(NAME "${name}" COMMAND ldc "${ll}")
+  add_test(NAME "${name}"
+           COMMAND ldc -stat=false -ldc-andersen
+                   "-ldc-src=${src}"
+                   "-ldc-expect=${CMAKE_CURRENT_SOURCE_DIR}/expected/${name}.json"
+                   "${ll}")
 endforeach()
 
 add_custom_target(test_ir ALL DEPENDS ${LDC_TEST_IR})
