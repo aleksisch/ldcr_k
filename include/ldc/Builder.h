@@ -31,6 +31,9 @@ struct BuildStats
     std::size_t escapingGeps = 0;  ///< gep result used as a value (e.g. vptr stored by a ctor)
     std::size_t skippedStmts = 0;  ///< statements involving only filtered nodes
     std::size_t indirectEdges = 0; ///< call/return edges added from the Andersen call graph
+    std::size_t virtualSites = 0;     ///< virtual call sites
+    std::size_t chaTargets = 0;       ///< (site, method) pairs from the vtable slots (CHA)
+    std::size_t andersenTargets = 0;  ///< (site, method) pairs in the Andersen call graph
     std::unordered_set<SvfId> escapingGepIds; ///< modelled as `base --assign--> gep` (offset dropped)
 
     void print(std::ostream& os) const;

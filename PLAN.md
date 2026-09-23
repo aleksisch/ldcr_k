@@ -26,6 +26,8 @@ Phase 2 (later, sketched only): add L_R → **L_DCR_k**.
 
 L_DC is sound but not precise (paper Def. 2, Lemma 4). That is fine for phase 1: it already
 beats L_FC on the Fig. 5 case, and the Eq. 15 case becomes the motivating test for phase 2.
+L_DC and L_FC are **incomparable**: on Fig. 8 (DP-C1) L_FC with the Andersen call graph is
+exact and L_DC is not (see §6, M4 findings).
 
 ---
 
@@ -108,7 +110,7 @@ Call graph: the `dispatch[t]` edges that lie on accepted paths, with their conte
 | Build | **CMake** + CTest |
 | SVF + LLVM | `svftools/svf:latest` image (SVF 3.4, LLVM 21.1.0); `find_package(SVF CONFIG)` via `SVF_DIR=/home/SVF-tools/SVF/Release-build/lib/cmake/SVF`, `LLVM_DIR` from the same image |
 | Test front end | `clang++` 21 from the image; `-O0 -Xclang -disable-O0-optnone -fno-discard-value-names -g`, then `opt -p=mem2reg` |
-| Dispatch candidates | SVF Andersen call graph (as P3Ctx uses `prePTA`) ∪ SVF CHA |
+| Dispatch candidates | L_D and kCFA: CHA from the vtable slots (as the paper). L_FC: SVF Andersen call graph |
 | Reference oracle | our own kCFA (paper Fig. 1 rules) on LDGraph |
 
 Development happens inside the image: the repo is mounted into a container based on
@@ -145,8 +147,8 @@ tests/CMakeLists.txt
 ```
 
 `ldc` CLI: options go through SVF's parser (`-ldc-*`), so they coexist with SVF's own:
-`ldc [-ldc-dot=<out>] <file.ll>`; to come: `-ldc-k=<n>`, `-ldc-mode={lfc,ldc,kcfa}`,
-`-ldc-query=<var>`, `-ldc-json=<out>`.
+`ldc [-ldc-dot=<out>] [-ldc-k=<n>] [-ldc-mode={lfc,kcfa,ldc}] [-ldc-src=<cpp>]
+[-ldc-expect=<json>] [-ldc-andersen] <file.ll>`; to come: `-ldc-query=<var>`, `-ldc-json=<out>`.
 
 ---
 
@@ -197,7 +199,7 @@ Three purposes:
 
 CTest runs every test as `<name>.andersen` (M2) and `<name>.<lfc|kcfa>.k<0|1|2>`.
 
-### M4 — Dispatch: L_D ∩ C_k  (= L_DC_k)
+### M4 — Dispatch: L_D ∩ C_k  (= L_DC_k)  — status: **done**
 - `Dispatch`:
   1. find virtual call sites (vptr load → vtable slot load → indirect call);
   2. recover the dynamic type `t` of each heap object (§5);
@@ -209,6 +211,9 @@ CTest runs every test as `<name>.andersen` (M2) and `<name>.<lfc|kcfa>.k<0|1|2>`
 - `fig5.cpp`: L_DC_k = kCFA (the receiver no longer crosses to the wrong target);
 - `fig3.cpp`: `C::foo` absent; `v ↦ {O1}` under `[c3, c1]`;
 - `eq15.cpp`: L_DC_k ⊋ kCFA (documents what L_R must fix).
+- added `fig8.cpp` (paper Fig. 8, DP-C1): L_DC_k ⊋ kCFA at every k.
+
+CTest adds `<name>.ldc.k<0|1|2>`.
 
 ### M5 — Evaluation (phase 1)
 - Table per test: |PTS|, spurious receivers, call edges per context — for
@@ -275,6 +280,23 @@ Findings from M3:
   `c3 → A::foo` comes from context-insensitive Andersen, so L_FC also enters `A::foo` under
   `[c3, c2]`, where only `b1` is the receiver; `o2` then reaches `A::foo::v`. kCFA does not.
   L_D fixes both (the edge is taken only under `new[A]`).
+
+Findings from M4:
+- **Edges** (`Builder::addDispatch`, encoding `D`): `a_i --store[p_i] ⟦ĉ⟧--> r`,
+  `r --assign--> r#c`, `r#c --dispatch[t] ĉ--> this^m'`, `this^m' --load[p_i]--> p_i`,
+  `ret^m' --store[ret]--> this^m'`, `r --load[ret] ⟦č⟧--> x`. The Andersen-wired edges of the
+  same call are encoding `Fc`; each mode uses only its own (`Solver::uses`). The paper's second,
+  boxed `r --assign ⟦č⟧--> r#c` is the same fact for L_D ∩ C_k; it is left for phase 2.
+- **Synthetic fields** `p_i` / `ret` are separate field ids (the paper's offsets `i` / `0` would
+  clash with real fields: field 0 is the vptr). `load[*]` does not read them.
+- **In inclusion form, L_DC_k is simple**: `dispatch[t]` = [I-VCall] for the receiver; arguments
+  and the result meet through the field `p_i` / `ret` of the heap object ⟨O, h⟩. Its losses vs
+  kCFA are exactly the paper's two: the field is shared by **all call sites** where O is the
+  receiver (Eq. 13, DP-C1: `fig8`) and by **all caller contexts** that map to the same heap
+  context h (Eq. 15, DP-C2: `eq15`, J1 has h = [] while the calls run in [c6] and [c7]).
+- **CHA targets** from vtable slots (no declared-type filter): `fig3` has 3 (`C::foo` included);
+  L_D never reaches `C::foo`, since no object of type C flows to `x`.
+- L_DC_k = kCFA on `static_calls`, `fields`, `fig3`, `fig5` for k = 0, 1, 2.
 
 ---
 

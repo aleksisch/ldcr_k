@@ -6,7 +6,7 @@
 // Options (parsed by SVF's option parser, so they coexist with SVF's own):
 //   -ldc-dot=<file>     write LDGraph to a Graphviz file
 //   -ldc-k=<n>          context depth k (call strings of length <= k)
-//   -ldc-mode=<m>       lfc (baseline) | kcfa (oracle); also selects the expectation key
+//   -ldc-mode=<m>       lfc (baseline) | kcfa (oracle) | ldc (L_DC_k); also the expectation key
 //   -ldc-src=<file>     C++ source, for `// label` object names
 //   -ldc-expect=<json>  check the queries in this file; exit 1 on failure
 //   -ldc-andersen       compare every variable's PTS with SVF Andersen (use with k = 0, lfc);
@@ -35,7 +35,7 @@ namespace
 
 const Option<std::string> DotOut("ldc-dot", "Write LDGraph to this Graphviz file", "");
 const Option<u32_t> ContextDepth("ldc-k", "Context depth k", 0);
-const Option<std::string> Mode("ldc-mode", "Analysis: lfc | kcfa", "lfc");
+const Option<std::string> Mode("ldc-mode", "Analysis: lfc | kcfa | ldc", "lfc");
 const Option<std::string> SourceFile("ldc-src", "C++ source file, for object labels", "");
 const Option<std::string> ExpectFile("ldc-expect", "Expected-results JSON to check", "");
 const Option<bool> CompareAndersen("ldc-andersen", "Compare PTS with SVF Andersen", false);
@@ -73,9 +73,11 @@ int main(int argc, char** argv)
         options.mode = ldc::Mode::Lfc;
     else if (Mode() == "kcfa")
         options.mode = ldc::Mode::Kcfa;
+    else if (Mode() == "ldc")
+        options.mode = ldc::Mode::Ldc;
     else
     {
-        std::cerr << "ldc: unknown -ldc-mode=" << Mode() << " (lfc | kcfa)\n";
+        std::cerr << "ldc: unknown -ldc-mode=" << Mode() << " (lfc | kcfa | ldc)\n";
         return 2;
     }
     options.allFunctionsReachable = CompareAndersen();

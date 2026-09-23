@@ -20,11 +20,11 @@ Solver::Solver(const LDGraph& graph, SolverOptions options) : graph_(graph), opt
     for (EdgeId e = 0; e < graph_.edges().size(); ++e)
     {
         const Edge& edge = graph_.edges()[e];
-        if (edge.dir != CallDir::None)
+        if (!uses(edge.encoding))
+            continue;
+        if (edge.dir == CallDir::Enter || edge.dir == CallDir::Exit)
         {
             const CallSite& site = graph_.callSites()[static_cast<std::size_t>(edge.callSite)];
-            if (options_.mode == Mode::Kcfa && site.isVirtual)
-                continue; // the oracle dispatches virtual calls itself
             callsByCaller_[site.caller].push_back(e);
             continue;
         }
@@ -42,6 +42,20 @@ Solver::Solver(const LDGraph& graph, SolverOptions options) : graph_(graph), opt
             if (graph_.callSites()[static_cast<std::size_t>(c)].isVirtual)
                 virtualSitesByCaller_[graph_.callSites()[static_cast<std::size_t>(c)].caller]
                     .push_back(c);
+}
+
+bool Solver::uses(Encoding encoding) const
+{
+    switch (encoding)
+    {
+    case Encoding::Common:
+        return true;
+    case Encoding::Fc:
+        return options_.mode == Mode::Lfc;
+    case Encoding::D:
+        return options_.mode == Mode::Ldc;
+    }
+    return false;
 }
 
 Solver::CtxId Solver::intern(const Ctx& ctx)
@@ -91,7 +105,7 @@ bool Solver::addAll(ObjSet& into, const ObjSet& from)
 }
 
 /// Field read with array-insensitive `*`: load[f] also sees store[*], and load[*]
-/// sees every field of the object.
+/// sees every real field of the object. Synthetic fields (p_i, ret) are separate from both.
 Solver::ObjSet Solver::readField(const Obj& object, FieldId field) const
 {
     ObjSet result;
@@ -103,6 +117,11 @@ Solver::ObjSet Solver::readField(const Obj& object, FieldId field) const
              ++it)
             result.insert(it->second.begin(), it->second.end());
         return result;
+    }
+    if (isSyntheticField(field))
+    {
+        auto it = heap_.find({object.first, object.second, field});
+        return it != heap_.end() ? it->second : result;
     }
     for (FieldId f : {field, kAnyField})
     {
@@ -129,6 +148,8 @@ bool Solver::applyIntra(const Edge& edge, CtxId ctx)
     case Label::Assign:
         changed |= addAll(pts_[dst], pts_[src]);
         break;
+    case Label::Dispatch: // always a call edge (ĉ)
+        break;
     case Label::Store: // src --store[f]--> base
     {
         const ObjSet bases = pts_[dst];
@@ -151,7 +172,18 @@ bool Solver::applyCall(const Edge& edge, CtxId callerCtx)
 {
     const CtxId calleeCtx = push(edge.callSite, callerCtx, options_.k);
     bool changed = false;
-    if (edge.dir == CallDir::Enter) // actual (caller) → formal (callee)
+    if (edge.label == Label::Dispatch) // r#c --dispatch[t] ĉ--> this: objects of type t only
+    {
+        const ObjSet receivers = pts_[{edge.src, nodeCtx(edge.src, callerCtx)}];
+        for (const Obj& receiver : receivers)
+        {
+            if (graph_.nodes()[receiver.first].type != edge.type)
+                continue;
+            changed |= reach(graph_.nodes()[edge.dst].function, calleeCtx);
+            changed |= pts_[{edge.dst, calleeCtx}].insert(receiver).second;
+        }
+    }
+    else if (edge.dir == CallDir::Enter) // actual (caller) → formal (callee)
     {
         changed |= reach(graph_.nodes()[edge.dst].function, calleeCtx);
         changed |= addAll(pts_[{edge.dst, nodeCtx(edge.dst, calleeCtx)}],

@@ -9,17 +9,24 @@ namespace ldc
 namespace
 {
 
-const char* const kLabelNames[] = {"new", "assign", "store", "load"};
+const char* const kLabelNames[] = {"new", "assign", "store", "load", "dispatch"};
 
 std::string edgeLabel(const Edge& edge)
 {
     std::string text = kLabelNames[static_cast<std::size_t>(edge.label)];
     if (edge.field == kAnyField)
         text += "[*]";
+    else if (edge.field == kRetField)
+        text += "[ret]";
+    else if (isSyntheticField(edge.field))
+        text += "[p" + std::to_string(kRetField - edge.field) + "]";
     else if (edge.field != kNoField)
         text += "[" + std::to_string(edge.field) + "]";
+    if (edge.type != kUnknownType)
+        text += "[t" + std::to_string(edge.type) + "]";
+    const char* const dirs[] = {"", " ^c", " vc", " [^c]", " [vc]"};
     if (edge.dir != CallDir::None)
-        text += (edge.dir == CallDir::Enter ? " ^c" : " vc") + std::to_string(edge.callSite);
+        text += dirs[static_cast<std::size_t>(edge.dir)] + std::to_string(edge.callSite);
     return text;
 }
 
@@ -42,8 +49,14 @@ NodeId LDGraph::nodeFor(SvfId svfId, NodeKind kind, const std::string& name,
 {
     auto [it, inserted] = bySvf_.emplace(svfId, static_cast<NodeId>(nodes_.size()));
     if (inserted)
-        nodes_.push_back(Node{kind, svfId, name, function, line});
+        addNode(Node{kind, svfId, name, function, line});
     return it->second;
+}
+
+NodeId LDGraph::addNode(const Node& node)
+{
+    nodes_.push_back(node);
+    return static_cast<NodeId>(nodes_.size() - 1);
 }
 
 CallSiteId LDGraph::addCallSite(const CallSite& callSite)

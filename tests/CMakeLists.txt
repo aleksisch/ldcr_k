@@ -26,9 +26,9 @@ foreach(src IN LISTS LDC_TEST_SOURCES)
   add_test(NAME "${name}.andersen"
            COMMAND ldc -stat=false -ldc-andersen
                    "-ldc-src=${src}" "-ldc-expect=${expect}" "${ll}")
-  # M3: the expected queries, per context depth and analysis.
+  # M3, M4: the expected queries, per context depth and analysis.
   foreach(k 0 1 2)
-    foreach(mode lfc kcfa)
+    foreach(mode lfc kcfa ldc)
       add_test(NAME "${name}.${mode}.k${k}"
                COMMAND ldc -stat=false -ldc-k=${k} -ldc-mode=${mode}
                        "-ldc-src=${src}" "-ldc-expect=${expect}" "${ll}")

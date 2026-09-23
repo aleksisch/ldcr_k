@@ -1,4 +1,4 @@
-// Solver — points-to on LDGraph with k-limited call-string contexts (M2, M3).
+// Solver — points-to on LDGraph with k-limited call-string contexts (M2, M3, M4).
 //
 // Contexts follow PLAN.md §2.3 (C_k as one shared context, kCFA's discipline):
 //   entering a call at c:  ctx  →  ⌈c :: ctx⌉_k
@@ -10,12 +10,18 @@
 // Fields: store[f] into b and load[f] out of b' meet through the per-object field heap,
 // i.e. exactly when b and b' share an object (the alias U-turn of L_F).
 //
-// Modes:
-//   Lfc   baseline L_FC_k: virtual calls use the plain assign(ĉ/č) edges wired from the
-//         Andersen call graph (paper Fig. 2, [P-VCall]).
-//   Kcfa  oracle, paper Fig. 1: those edges are ignored; a virtual call dispatches each
-//         receiver object ⟨O, h⟩ separately, by O's dynamic type ([I-VCall]):
-//         O goes to `this` of its own target only, the other actuals to every target.
+// Modes (which encoding of virtual calls is used, see Encoding in LDGraph.h):
+//   Lfc   baseline L_FC_k: the plain assign(ĉ/č) edges wired from the Andersen call graph
+//         (paper Fig. 2, [P-VCall]).
+//   Kcfa  oracle, paper Fig. 1: no edges; a virtual call dispatches each receiver object
+//         ⟨O, h⟩ separately, by O's dynamic type ([I-VCall]): O goes to `this` of its own
+//         target only, the other actuals to every target it dispatches to.
+//   Ldc   L_DC_k = L_D ∩ C_k on the paper's Fig. 6 edges. dispatch[t] ĉ passes only objects
+//         of type t (L_D). Arguments and the result go through synthetic fields of the
+//         receiver object: store[p_i] in the caller, load[p_i] from `this` in the callee.
+//         The boxed ⟦ĉ⟧ / ⟦č⟧ are ε for C_k, so these are intra-procedural edges.
+//         Precision loss vs kCFA (paper Eq. 13, 15): the field p_i of ⟨O, h⟩ is shared by
+//         all call sites and all caller contexts in which O is the receiver.
 
 #pragma once
 
@@ -35,6 +41,7 @@ enum class Mode
 {
     Lfc,
     Kcfa,
+    Ldc,
 };
 
 struct SolverOptions
@@ -82,6 +89,7 @@ private:
     ObjSet readField(const Obj& object, FieldId field) const;
 
     bool applyIntra(const Edge& edge, CtxId ctx);
+    bool uses(Encoding encoding) const;
     bool applyCall(const Edge& edge, CtxId callerCtx);
     bool applyVirtualCall(CallSiteId site, CtxId callerCtx);
 

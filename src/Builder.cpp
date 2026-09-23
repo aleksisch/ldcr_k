@@ -31,7 +31,9 @@ void BuildStats::print(std::ostream& os) const
 {
     os << "Build: " << indirectEdges << " indirect call/return edges from Andersen, " << variantGeps
        << " variable-offset geps, " << escapingGeps << " escaping geps, " << skippedStmts
-       << " skipped statements\n";
+       << " skipped statements\n"
+       << "Virtual calls: " << virtualSites << " sites, " << chaTargets << " CHA targets, "
+       << andersenTargets << " Andersen targets\n";
 }
 
 namespace
@@ -78,7 +80,9 @@ public:
         addDirectCalls();
         addDirectReturns();
         addIndirectCalls();
+        describeVirtualSites();
         assignTypes();
+        addDispatch();
         return std::move(graph_);
     }
 
@@ -126,11 +130,8 @@ private:
             ++stats_.skippedStmts;
             return;
         }
-        Edge e{node(src), node(dst), label};
-        e.field = field;
-        e.callSite = callSite;
-        e.dir = dir;
-        graph_.addEdge(e);
+        const NodeId from = node(src); // before node(dst): node ids follow this order
+        addEdge(from, node(dst), label, field, callSite, dir);
     }
 
     CallSiteId callSite(const CallICFGNode* cs)
@@ -306,8 +307,8 @@ private:
     void wireIndirect(const CallICFGNode* cs, const FunObjVar* callee)
     {
         const CallSiteId site = callSite(cs);
-        if (cs->isVirtualCall())
-            describeVirtualTarget(site, cs, callee);
+        encoding_ = cs->isVirtualCall() ? Encoding::Fc : Encoding::Common;
+        stats_.andersenTargets += cs->isVirtualCall();
         if (pag_.hasFunArgsList(callee))
         {
             const auto& formals = pag_.getFunArgsList(callee);
@@ -326,6 +327,77 @@ private:
             edge(retIt->second, actualRet, Label::Assign, kNoField, site, CallDir::Exit);
             ++stats_.indirectEdges;
         }
+        encoding_ = Encoding::Common;
+    }
+
+    // ---- virtual calls, paper Fig. 6 ([C-VCall], [C-Param], [C-Ret]) ---------
+    //
+    //   a_i  --store[p_i] ⟦ĉ⟧-->  r            (caller: argument into the receiver)
+    //   r    --assign-->          r#c
+    //   r#c  --dispatch[t] ĉ-->   this^m'      for each t with m' = dispatch(c, t)  (CHA)
+    //   this^m' --load[p_i]-->    p_i^m'       (callee, once per method)
+    //   ret^m'  --store[ret]-->   this^m'      (callee, once per method)
+    //   r    --load[ret] ⟦č⟧-->   x            (caller: the call's result)
+    //
+    // The paper also has a boxed r --assign ⟦č⟧--> r#c for the argument excursion; for
+    // L_D ∩ C_k it is the same edge (boxed labels are ε there). Phase 2 (L_R) adds it.
+
+    void addDispatch()
+    {
+        encoding_ = Encoding::D;
+        std::unordered_set<NodeId> methodsDone; // by `this` formal
+        for (CallSiteId c = 0; c < static_cast<CallSiteId>(graph_.callSites().size()); ++c)
+        {
+            const CallSite site = graph_.callSites()[static_cast<std::size_t>(c)];
+            if (!site.isVirtual || site.actuals.empty() || !site.actuals[0])
+                continue;
+            const NodeId r = *site.actuals[0];
+            const Node receiver = graph_.nodes()[r];
+            const NodeId rc = graph_.addNode(Node{NodeKind::RecvCopy, receiver.svfId,
+                                                  receiver.name + "#c" + std::to_string(c),
+                                                  receiver.function, site.line});
+            addEdge(r, rc, Label::Assign);
+            for (std::size_t i = 1; i < site.actuals.size(); ++i)
+                if (site.actuals[i])
+                    addEdge(*site.actuals[i], r, Label::Store, paramField(static_cast<int>(i)), c,
+                            CallDir::BoxEnter);
+            if (site.actualRet)
+                addEdge(r, *site.actualRet, Label::Load, kRetField, c, CallDir::BoxExit);
+
+            for (const VirtualTarget& target : site.targets)
+            {
+                if (target.formals.empty())
+                    continue;
+                const NodeId self = target.formals[0];
+                for (TypeId t : target.types)
+                {
+                    Edge e{rc, self, Label::Dispatch};
+                    e.type = t;
+                    e.callSite = c;
+                    e.dir = CallDir::Enter;
+                    e.encoding = Encoding::D;
+                    graph_.addEdge(e);
+                }
+                if (!methodsDone.insert(self).second)
+                    continue;
+                for (std::size_t i = 1; i < target.formals.size(); ++i)
+                    addEdge(self, target.formals[i], Label::Load, paramField(static_cast<int>(i)));
+                if (target.ret)
+                    addEdge(*target.ret, self, Label::Store, kRetField);
+            }
+        }
+        encoding_ = Encoding::Common;
+    }
+
+    void addEdge(NodeId src, NodeId dst, Label label, FieldId field = kNoField,
+                 CallSiteId callSite = kNoCallSite, CallDir dir = CallDir::None)
+    {
+        Edge e{src, dst, label};
+        e.field = field;
+        e.callSite = callSite;
+        e.dir = dir;
+        e.encoding = encoding_;
+        graph_.addEdge(e);
     }
 
     // ---- dynamic types -------------------------------------------------------
@@ -435,34 +507,52 @@ private:
         return entry ? llvm::dyn_cast<llvm::Function>(entry->stripPointerCasts()) : nullptr;
     }
 
-    /// Records, for a virtual call site, its receiver/actuals and the target `callee` with
-    /// the vtables that dispatch to it here. SVF's CHG (getVFnsFromVtbls) returns nothing
-    /// in this SVF build, so the vtables are read directly (vtableSlot).
-    void describeVirtualTarget(CallSiteId site, const CallICFGNode* cs, const FunObjVar* callee)
+    /// Records every virtual call site with its receiver/actuals and its CHA targets: the
+    /// methods in the call's vtable slot, over all vtables of the program. SVF's CHG
+    /// (getVFnsFromVtbls) returns nothing in this SVF build, so the vtables are read directly
+    /// (vtableSlot). No declared-type filter: L_D's dispatch[t] filters by the receiver's type.
+    void describeVirtualSites()
     {
-        CallSite& info = graph_.callSite(site);
-        if (info.actuals.empty())
+        LLVMModuleSet* modules = LLVMModuleSet::getLLVMModuleSet();
+        for (const CallICFGNode* cs : pag_.getCallSiteSet())
         {
+            if (!cs->isVirtualCall() || isIntrinsicName(cs->getCaller()->getName()))
+                continue;
+            const CallSiteId site = callSite(cs);
+            ++stats_.virtualSites;
+            CallSite& info = graph_.callSite(site);
             for (const ValVar* actual : cs->getActualParms())
                 info.actuals.push_back(optionalNode(actual));
             info.actualRet = optionalNode(cs->getRetICFGNode()->getActualRet());
-        }
 
-        VirtualTarget target;
-        target.callee = demangle(callee->getName());
-        for (const VTable& vtable : vtables())
-        {
-            const llvm::Function* fn = vtableSlot(vtable.global, cs->getFunIdxInVtable());
-            if (fn != nullptr && fn->getName() == callee->getName() && relevant(vtable.object))
-                target.vtables.push_back(node(vtable.object));
+            std::vector<const llvm::Function*> order;
+            std::unordered_map<const llvm::Function*, std::vector<NodeId>> vtablesOf;
+            for (const VTable& vtable : vtables())
+            {
+                const llvm::Function* fn = vtableSlot(vtable.global, cs->getFunIdxInVtable());
+                if (fn == nullptr || fn->isDeclaration() || !relevant(vtable.object))
+                    continue;
+                if (vtablesOf.find(fn) == vtablesOf.end())
+                    order.push_back(fn);
+                vtablesOf[fn].push_back(node(vtable.object));
+            }
+
+            for (const llvm::Function* fn : order)
+            {
+                const FunObjVar* callee = modules->getFunObjVar(fn);
+                VirtualTarget target;
+                target.callee = demangle(fn->getName().str());
+                target.vtables = vtablesOf[fn];
+                if (pag_.hasFunArgsList(callee))
+                    for (const ValVar* formal : pag_.getFunArgsList(callee))
+                        target.formals.push_back(node(formal));
+                const auto& funRets = pag_.getFunRets();
+                if (auto it = funRets.find(callee); it != funRets.end())
+                    target.ret = optionalNode(it->second);
+                info.targets.push_back(std::move(target));
+                ++stats_.chaTargets;
+            }
         }
-        if (pag_.hasFunArgsList(callee))
-            for (const ValVar* formal : pag_.getFunArgsList(callee))
-                target.formals.push_back(node(formal));
-        const auto& funRets = pag_.getFunRets();
-        if (auto it = funRets.find(callee); it != funRets.end())
-            target.ret = optionalNode(it->second);
-        info.targets.push_back(std::move(target));
     }
 
     SVFIR& pag_;
@@ -471,6 +561,7 @@ private:
     bool vtablesCollected_ = false;
     BuildStats& stats_;
     LDGraph graph_;
+    Encoding encoding_ = Encoding::Common; ///< encoding of the edges being added
     std::unordered_map<SvfId, std::pair<const SVFVar*, FieldId>> gepDef_;
     std::unordered_map<const CallICFGNode*, CallSiteId> callSiteIds_;
 };

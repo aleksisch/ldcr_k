@@ -2,7 +2,7 @@
 //
 // Built from SVF's SVFIR by ldc::buildLDGraph (Builder.h). Unlike SVFIR it
 // carries the L_D / C_k labels directly on its edges: fields on store/load,
-// call sites and directions (ĉ / č) on call edges.
+// types on dispatch, call sites and directions (ĉ / č) on call edges.
 
 #pragma once
 
@@ -30,6 +30,13 @@ using FieldId = std::int32_t;
 inline constexpr FieldId kNoField = -1;
 inline constexpr FieldId kAnyField = -2;
 
+/// Synthetic fields of a receiver object (paper [C-Param], [C-Ret]): the return value and
+/// the i-th non-this parameter (i >= 1). The paper uses offsets 0 and i; ours are kept
+/// apart from real field offsets (field 0 of a C++ object is its vptr).
+inline constexpr FieldId kRetField = -10;
+inline constexpr FieldId paramField(int i) { return kRetField - i; }
+inline constexpr bool isSyntheticField(FieldId f) { return f <= kRetField; }
+
 /// Dynamic type (a class with a vtable), index into LDGraph::types(); kUnknownType for
 /// objects without one (plain structs, globals, ...).
 using TypeId = std::int32_t;
@@ -37,8 +44,9 @@ inline constexpr TypeId kUnknownType = -1;
 
 enum class NodeKind : std::uint8_t
 {
-    Var, ///< SVF value variable (top-level pointer)
-    Obj, ///< abstract object (allocation site)
+    Var,      ///< SVF value variable (top-level pointer)
+    Obj,      ///< abstract object (allocation site)
+    RecvCopy, ///< per-call-site receiver copy r#c
 };
 
 /// Label above the edge (L_D alphabet).
@@ -48,14 +56,28 @@ enum class Label : std::uint8_t
     Assign,
     Store,
     Load,
+    Dispatch,
 };
 
-/// Label below the edge (C_k alphabet): ĉ = Enter, č = Exit.
+/// Label below the edge. ĉ = Enter, č = Exit (C_k alphabet). The boxed ⟦ĉ⟧ / ⟦č⟧ mark the
+/// start / end of a dispatch at a virtual call (paper Fig. 6): ε for C_k, used by L_R (phase 2).
 enum class CallDir : std::uint8_t
 {
     None,
     Enter,
     Exit,
+    BoxEnter,
+    BoxExit,
+};
+
+/// Which analyses an edge belongs to. Virtual calls have two encodings:
+/// Fc — plain assign(ĉ/č) edges to the Andersen targets (paper Fig. 2, [P-VCall]);
+/// D  — receiver fields, r#c and dispatch[t] edges to the CHA targets (paper Fig. 6, [C-VCall]).
+enum class Encoding : std::uint8_t
+{
+    Common,
+    Fc,
+    D,
 };
 
 struct Node
@@ -80,12 +102,14 @@ struct Edge
     NodeId dst;
     Label label;
     FieldId field = kNoField;
+    TypeId type = kUnknownType; ///< dispatch[t]
     CallSiteId callSite = kNoCallSite;
     CallDir dir = CallDir::None;
+    Encoding encoding = Encoding::Common;
 };
 
-/// One possible target of a virtual call site: the method, the vtables that dispatch
-/// to it at this site (one per dynamic type), and its formals.
+/// One possible target of a virtual call site (CHA: the method in the call's vtable slot of
+/// some class): the method, the vtables that dispatch to it here, and its formals.
 struct VirtualTarget
 {
     std::string callee;            ///< demangled method name
@@ -101,7 +125,7 @@ struct CallSite
     int line = 0;       ///< source line of the call, 0 if unknown
     bool isVirtual = false;
 
-    // Filled for virtual call sites only (used by the kCFA oracle).
+    // Filled for virtual call sites only (used by the kCFA oracle and by L_D).
     std::vector<std::optional<NodeId>> actuals; ///< actuals[0] is the receiver
     std::optional<NodeId> actualRet;
     std::vector<VirtualTarget> targets;
@@ -113,6 +137,8 @@ public:
     /// Returns the node for an SVF id, creating it on first use.
     NodeId nodeFor(SvfId svfId, NodeKind kind, const std::string& name,
                    const std::string& function, int line);
+    /// Adds a node with no SVF counterpart of its own (r#c).
+    NodeId addNode(const Node& node);
     std::optional<NodeId> findSvf(SvfId svfId) const
     {
         auto it = bySvf_.find(svfId);
