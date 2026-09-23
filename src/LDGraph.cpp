@@ -52,6 +52,15 @@ CallSiteId LDGraph::addCallSite(const CallSite& callSite)
     return static_cast<CallSiteId>(callSites_.size() - 1);
 }
 
+TypeId LDGraph::typeFor(const std::string& className, NodeId vtable)
+{
+    for (TypeId t = 0; t < static_cast<TypeId>(types_.size()); ++t)
+        if (types_[static_cast<std::size_t>(t)].name == className)
+            return t;
+    types_.push_back(Type{className, vtable});
+    return static_cast<TypeId>(types_.size() - 1);
+}
+
 void LDGraph::printSummary(std::ostream& os) const
 {
     std::array<std::size_t, std::size(kLabelNames)> byLabel{};
@@ -82,6 +91,8 @@ void LDGraph::dumpDot(std::ostream& os) const
     {
         const Node& node = nodes_[n];
         std::string text = node.kind == NodeKind::Obj ? node.name : node.function + "::" + node.name;
+        if (node.type != kUnknownType)
+            text += " : " + types_[static_cast<std::size_t>(node.type)].name;
         if (node.line != 0)
             text += " @" + std::to_string(node.line);
         const char* shape = node.kind == NodeKind::Obj ? "box" : "ellipse";

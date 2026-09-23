@@ -5,8 +5,16 @@
 #include "SVFIR/SVFIR.h"
 #include "SVFIR/SVFStatements.h"
 #include "SVFIR/SVFVariables.h"
+#include "SVF-LLVM/LLVMModule.h"
 
 #include <llvm/Demangle/Demangle.h>
+#include <llvm/IR/Constants.h>
+#include <llvm/IR/Function.h>
+#include <llvm/IR/GlobalVariable.h>
+#include <llvm/IR/Module.h>
+
+#include <optional>
+#include <vector>
 
 #include <ostream>
 #include <regex>
@@ -70,6 +78,7 @@ public:
         addDirectCalls();
         addDirectReturns();
         addIndirectCalls();
+        assignTypes();
         return std::move(graph_);
     }
 
@@ -297,6 +306,8 @@ private:
     void wireIndirect(const CallICFGNode* cs, const FunObjVar* callee)
     {
         const CallSiteId site = callSite(cs);
+        if (cs->isVirtualCall())
+            describeVirtualTarget(site, cs, callee);
         if (pag_.hasFunArgsList(callee))
         {
             const auto& formals = pag_.getFunArgsList(callee);
@@ -317,8 +328,147 @@ private:
         }
     }
 
+    // ---- dynamic types -------------------------------------------------------
+    //
+    // As in paper [C-New], an object's type is fixed at its allocation. In C++ the
+    // allocation `new T(...)` is `%p = operator new(...)` followed by the constructor
+    // `T::T(%p)` called directly on %p; base-class constructors get `this` instead.
+    // So the class of an object = the constructor whose `this` receives the allocated
+    // pointer. (Reading the vptr from field 0 does not work flow-insensitively: base
+    // constructors store their own vtable there first.)
+
+    /// "ns::X::X(int)" -> "ns::X"; empty if `function` is not a constructor.
+    static std::string constructorClass(const std::string& function)
+    {
+        const std::string qualified = function.substr(0, function.find('('));
+        const std::size_t sep = qualified.rfind("::");
+        if (sep == std::string::npos)
+            return "";
+        const std::string cls = qualified.substr(0, sep);
+        const std::size_t clsSep = cls.rfind("::");
+        const std::string clsLast = clsSep == std::string::npos ? cls : cls.substr(clsSep + 2);
+        return qualified.substr(sep + 2) == clsLast ? cls : "";
+    }
+
+    void assignTypes()
+    {
+        std::unordered_map<std::string, NodeId> vtableByClass;
+        const std::string prefix = "vtable for ";
+        for (const VTable& vtable : vtables())
+        {
+            const std::string name = demangle(vtable.global->getName().str());
+            if (name.rfind(prefix, 0) == 0 && relevant(vtable.object))
+                vtableByClass.emplace(name.substr(prefix.size()), node(vtable.object));
+        }
+
+        std::unordered_map<NodeId, std::vector<NodeId>> allocatedInto; // var -> objects
+        for (const Edge& e : graph_.edges())
+            if (e.label == Label::New)
+                allocatedInto[e.dst].push_back(e.src);
+
+        for (EdgeId id = 0; id < graph_.edges().size(); ++id)
+        {
+            const Edge& e = graph_.edges()[id];
+            const Node& formal = graph_.nodes()[e.dst];
+            if (e.dir != CallDir::Enter || formal.name != "this")
+                continue;
+            const std::string cls = constructorClass(formal.function);
+            auto vtable = vtableByClass.find(cls);
+            if (cls.empty() || vtable == vtableByClass.end())
+                continue;
+            const TypeId type = graph_.typeFor(cls, vtable->second);
+            for (NodeId object : allocatedInto[e.src])
+                graph_.node(object).type = type;
+        }
+
+        for (CallSiteId c = 0; c < static_cast<CallSiteId>(graph_.callSites().size()); ++c)
+            for (VirtualTarget& target : graph_.callSite(c).targets)
+                for (TypeId t = 0; t < static_cast<TypeId>(graph_.types().size()); ++t)
+                    for (NodeId vtable : target.vtables)
+                        if (graph_.types()[static_cast<std::size_t>(t)].vtable == vtable)
+                            target.types.push_back(t);
+    }
+
+    std::optional<NodeId> optionalNode(const SVFVar* var)
+    {
+        if (!relevant(var))
+            return std::nullopt;
+        return node(var);
+    }
+
+    /// A vtable of the program: its LLVM global and its SVF object node.
+    struct VTable
+    {
+        const llvm::GlobalVariable* global;
+        const SVFVar* object;
+    };
+
+    /// All vtables with an initializer (Itanium ABI: globals named _ZTV...). Taken from LLVM,
+    /// then mapped to SVF objects: SVF names these objects after the class ("A"), not "_ZTV1A".
+    const std::vector<VTable>& vtables()
+    {
+        if (!vtablesCollected_)
+        {
+            LLVMModuleSet* modules = LLVMModuleSet::getLLVMModuleSet();
+            for (u32_t i = 0; i < modules->getModuleNum(); ++i)
+                for (const llvm::GlobalVariable& global : modules->getModule(i)->globals())
+                    if (global.getName().starts_with("_ZTV") && global.hasInitializer())
+                        vtables_.push_back({&global, pag_.getGNode(modules->getObjectNode(&global))});
+            vtablesCollected_ = true;
+        }
+        return vtables_;
+    }
+
+    /// The function in `slot` of a vtable, read from its LLVM initializer.
+    /// Itanium ABI, single inheritance: `{ [N x ptr] [offset-to-top, RTTI, f0, f1, ...] }`
+    /// and the vptr stored by constructors points at element 2 (the address point).
+    /// Multiple inheritance (secondary vtables, thunks) is out of scope (PLAN.md §5).
+    static const llvm::Function* vtableSlot(const llvm::GlobalVariable* vtable, s32_t slot)
+    {
+        constexpr unsigned kAddressPoint = 2;
+        if (slot < 0)
+            return nullptr;
+        const llvm::Constant* array = vtable->getInitializer()->getAggregateElement(0u);
+        if (array == nullptr)
+            return nullptr;
+        const llvm::Constant* entry = array->getAggregateElement(kAddressPoint + static_cast<unsigned>(slot));
+        return entry ? llvm::dyn_cast<llvm::Function>(entry->stripPointerCasts()) : nullptr;
+    }
+
+    /// Records, for a virtual call site, its receiver/actuals and the target `callee` with
+    /// the vtables that dispatch to it here. SVF's CHG (getVFnsFromVtbls) returns nothing
+    /// in this SVF build, so the vtables are read directly (vtableSlot).
+    void describeVirtualTarget(CallSiteId site, const CallICFGNode* cs, const FunObjVar* callee)
+    {
+        CallSite& info = graph_.callSite(site);
+        if (info.actuals.empty())
+        {
+            for (const ValVar* actual : cs->getActualParms())
+                info.actuals.push_back(optionalNode(actual));
+            info.actualRet = optionalNode(cs->getRetICFGNode()->getActualRet());
+        }
+
+        VirtualTarget target;
+        target.callee = demangle(callee->getName());
+        for (const VTable& vtable : vtables())
+        {
+            const llvm::Function* fn = vtableSlot(vtable.global, cs->getFunIdxInVtable());
+            if (fn != nullptr && fn->getName() == callee->getName() && relevant(vtable.object))
+                target.vtables.push_back(node(vtable.object));
+        }
+        if (pag_.hasFunArgsList(callee))
+            for (const ValVar* formal : pag_.getFunArgsList(callee))
+                target.formals.push_back(node(formal));
+        const auto& funRets = pag_.getFunRets();
+        if (auto it = funRets.find(callee); it != funRets.end())
+            target.ret = optionalNode(it->second);
+        info.targets.push_back(std::move(target));
+    }
+
     SVFIR& pag_;
     const CallGraph& callGraph_;
+    std::vector<VTable> vtables_;
+    bool vtablesCollected_ = false;
     BuildStats& stats_;
     LDGraph graph_;
     std::unordered_map<SvfId, std::pair<const SVFVar*, FieldId>> gepDef_;

@@ -17,6 +17,7 @@ namespace ldc
 {
 
 using NodeId = std::uint32_t;
+using EdgeId = std::uint32_t;
 using SvfId = std::uint32_t;
 
 /// Call site index into LDGraph::callSites(), or kNoCallSite.
@@ -28,6 +29,11 @@ inline constexpr CallSiteId kNoCallSite = -1;
 using FieldId = std::int32_t;
 inline constexpr FieldId kNoField = -1;
 inline constexpr FieldId kAnyField = -2;
+
+/// Dynamic type (a class with a vtable), index into LDGraph::types(); kUnknownType for
+/// objects without one (plain structs, globals, ...).
+using TypeId = std::int32_t;
+inline constexpr TypeId kUnknownType = -1;
 
 enum class NodeKind : std::uint8_t
 {
@@ -59,6 +65,13 @@ struct Node
     std::string name;     ///< variable / object name
     std::string function; ///< enclosing function (demangled), empty for objects
     int line = 0;         ///< source line (objects: allocation line), 0 if unknown
+    TypeId type = kUnknownType; ///< objects: dynamic type, known at allocation
+};
+
+struct Type
+{
+    std::string name; ///< class name, e.g. "B"
+    NodeId vtable;    ///< its vtable object
 };
 
 struct Edge
@@ -71,11 +84,27 @@ struct Edge
     CallDir dir = CallDir::None;
 };
 
+/// One possible target of a virtual call site: the method, the vtables that dispatch
+/// to it at this site (one per dynamic type), and its formals.
+struct VirtualTarget
+{
+    std::string callee;            ///< demangled method name
+    std::vector<NodeId> vtables;   ///< vtable objects whose slot at this site is `callee`
+    std::vector<TypeId> types;     ///< the dynamic types that dispatch to `callee` here
+    std::vector<NodeId> formals;   ///< formals[0] is `this`
+    std::optional<NodeId> ret;     ///< formal return, if any
+};
+
 struct CallSite
 {
     std::string caller; ///< demangled caller name
     int line = 0;       ///< source line of the call, 0 if unknown
     bool isVirtual = false;
+
+    // Filled for virtual call sites only (used by the kCFA oracle).
+    std::vector<std::optional<NodeId>> actuals; ///< actuals[0] is the receiver
+    std::optional<NodeId> actualRet;
+    std::vector<VirtualTarget> targets;
 };
 
 class LDGraph
@@ -92,6 +121,12 @@ public:
 
     void addEdge(const Edge& edge) { edges_.push_back(edge); }
     CallSiteId addCallSite(const CallSite& callSite);
+    CallSite& callSite(CallSiteId id) { return callSites_[static_cast<std::size_t>(id)]; }
+    Node& node(NodeId id) { return nodes_[id]; }
+
+    /// The type of a class, creating it on first use.
+    TypeId typeFor(const std::string& className, NodeId vtable);
+    const std::vector<Type>& types() const { return types_; }
 
     const std::vector<Node>& nodes() const { return nodes_; }
     const std::vector<Edge>& edges() const { return edges_; }
@@ -104,6 +139,7 @@ private:
     std::vector<Node> nodes_;
     std::vector<Edge> edges_;
     std::vector<CallSite> callSites_;
+    std::vector<Type> types_;
     std::unordered_map<SvfId, NodeId> bySvf_;
 };
 

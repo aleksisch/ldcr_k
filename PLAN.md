@@ -188,10 +188,14 @@ Three purposes:
 2. **Oracle**: `KCFA` implements the paper's Fig. 1 rules on LDGraph — the ground truth.
 3. **Reproduce the defect** before fixing it.
 
-**Done when:**
-- `fields.cpp`, `static_calls.cpp`, `fig3.cpp` (k = 1, 2): L_FC_k = kCFA
-  (validates C_k and heap context k−1);
-- `fig5.cpp`: L_FC_k ⊋ kCFA — the Fig. 5 loss is reproduced.
+**Done when** (revised after implementing; status: **done**):
+- `fields.cpp`, `static_calls.cpp` (k = 0, 1, 2), `fig3.cpp` (k = 1), `eq15.cpp` (k = 1, 2):
+  L_FC_k = kCFA (validates C_k and heap context k−1);
+- `fig5.cpp` (k = 0): L_FC_k ⊋ kCFA — the Fig. 5 loss is reproduced;
+- `fig3.cpp` (k = 2): L_FC_k ⊋ kCFA — a second loss, from the context-insensitive call graph
+  (see §6, M3 findings).
+
+CTest runs every test as `<name>.andersen` (M2) and `<name>.<lfc|kcfa>.k<0|1|2>`.
 
 ### M4 — Dispatch: L_D ∩ C_k  (= L_DC_k)
 - `Dispatch`:
@@ -221,7 +225,7 @@ Three purposes:
 | Multiple inheritance, `this` adjustment thunks | **out of scope**; tests use single inheritance; detect and report unsupported sites |
 | Function pointers (no receiver) | handled like static calls with Andersen targets (L_FC style); no `dispatch[t]` |
 | Pointer-to-member-function calls | out of scope; report |
-| Object type recovery | read the vtable stored in the object's field 0 by its constructor (see §6); fall back to the ctor call on the returned pointer |
+| Object type recovery | the class of the constructor called directly on the allocated pointer (see §6, M3 findings) |
 | Stack / global objects with virtual methods | allocation site = `alloca` / global, type from ctor |
 | Arrays, unions, casts | inherit SVF's field model; casts = `assign` |
 | Standard library | analyse only user code first; model `operator new`, ignore `std::` bodies |
@@ -252,8 +256,25 @@ Findings from M2:
 - **SVF's Andersen has the paper's Fig. 5 defect.** On `fig5.cpp` it gives `this` of `E::foo` =
   `{e1, f1}`, the same as our L_FC wiring: it passes the receiver to `this` of every target like an
   ordinary argument. So SVF Andersen is itself an L_FC-style baseline for M5, not only a sanity check.
-- **Type recovery for M4** can read the vtable from field 0 of the object (`DynTypeOf(O)` = class of
-  the vtable in `O.field0`), instead of pattern-matching constructor calls.
+- ~~Type recovery for M4 can read the vtable from field 0.~~ Wrong, see M3 findings.
+
+Findings from M3:
+- **SVF's CHG gives no virtual targets** in this build (`getVFnsFromVtbls` is empty). `Builder`
+  reads the vtables itself: every LLVM global `_ZTV*` with an initializer; the slot for a call
+  site is initializer element `2 + getFunIdxInVtable()` (Itanium address point 2). The SVF object
+  of a vtable is named after the class ("A"), not `_ZTV1A`, so it is found through
+  `LLVMModuleSet::getObjectNode(global)`, not by name.
+- **Field 0 does not give the dynamic type.** Flow-insensitively, field 0 of an `F` object holds
+  both `vtable for F` and `vtable for E`: `F::F` calls `E::E`, which stores its own vptr first.
+  So `DynTypeOf(O)` is set at allocation (as paper [C-New]): the class of the constructor whose
+  `this` receives the allocated pointer directly (base constructors get `this`, not the
+  allocation). `Builder::assignTypes` stores it on the object node and on its `new` edge.
+- **k matters for the examples.** `eq15.cpp` needs k = 2 even for kCFA: at k = 1 both calls of
+  `id` run in `[c8]`. `fig3.cpp` needs k = 2 (heap context of `d1`).
+- **L_FC has a second loss besides Fig. 5**, on `fig3.cpp` at k = 2: the call graph edge
+  `c3 → A::foo` comes from context-insensitive Andersen, so L_FC also enters `A::foo` under
+  `[c3, c2]`, where only `b1` is the receiver; `o2` then reaches `A::foo::v`. kCFA does not.
+  L_D fixes both (the edge is taken only under `new[A]`).
 
 ---
 

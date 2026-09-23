@@ -1,14 +1,21 @@
-// Solver — L_F reachability on LDGraph, k = 0 (milestone M2).
+// Solver — points-to on LDGraph with k-limited call-string contexts (M2, M3).
 //
-// O ∈ PTS(v) iff some path O → v spells a word in L_F:
-//   flowsto → new flows*        flows → assign | store[f] alias load[f]
-//   alias(x, y) iff x and y are reached by a common object.
-// With fields resolved per object (the field heap below), this is the standard
-// fixpoint for the L_F relation: store[f] into b and load[f] out of b' meet
-// exactly when b and b' share an object O, i.e. through the alias U-turn at O.
+// Contexts follow PLAN.md §2.3 (C_k as one shared context, kCFA's discipline):
+//   entering a call at c:  ctx  →  ⌈c :: ctx⌉_k
+//   returning at c:        the caller's ctx is the one the call was entered from
+//   allocation:            the object gets heap context ⌈ctx⌉_{k-1}
+// Facts are tagged with contexts, ⟨node, ctx⟩ — the finite-state product of L_F with
+// C_k, built lazily (only reachable contexts). Globals live in the empty context.
 //
-// Call edges (ĉ / č) are treated as plain assign here: no contexts yet (M3).
-// A naive round-robin fixpoint for now; a worklist comes with contexts.
+// Fields: store[f] into b and load[f] out of b' meet through the per-object field heap,
+// i.e. exactly when b and b' share an object (the alias U-turn of L_F).
+//
+// Modes:
+//   Lfc   baseline L_FC_k: virtual calls use the plain assign(ĉ/č) edges wired from the
+//         Andersen call graph (paper Fig. 2, [P-VCall]).
+//   Kcfa  oracle, paper Fig. 1: those edges are ignored; a virtual call dispatches each
+//         receiver object ⟨O, h⟩ separately, by O's dynamic type ([I-VCall]):
+//         O goes to `this` of its own target only, the other actuals to every target.
 
 #pragma once
 
@@ -16,33 +23,83 @@
 
 #include <map>
 #include <set>
+#include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
 namespace ldc
 {
 
+enum class Mode
+{
+    Lfc,
+    Kcfa,
+};
+
+struct SolverOptions
+{
+    unsigned k = 0;
+    Mode mode = Mode::Lfc;
+    /// Start every function in the empty context (as SVF's Andersen analyses every function),
+    /// instead of only `main`. Used for the comparison with Andersen.
+    bool allFunctionsReachable = false;
+};
+
 class Solver
 {
 public:
-    explicit Solver(const LDGraph& graph);
+    Solver(const LDGraph& graph, SolverOptions options);
 
     void solve();
 
-    /// Objects (LDGraph node ids) that node `n` may point to.
-    const std::set<NodeId>& pts(NodeId n) const { return pts_[n]; }
+    /// Objects (LDGraph node ids) that node `n` may point to, in any context.
+    std::set<NodeId> pts(NodeId n) const;
 
     std::size_t iterations() const { return iterations_; }
+    std::size_t contextCount() const { return contexts_.size(); }
+    /// Number of (function, context) pairs analysed.
+    std::size_t methodContextCount() const;
 
 private:
-    using FieldKey = std::pair<NodeId, FieldId>; // (object, field)
+    using Ctx = std::vector<CallSiteId>; ///< most recent call site first
+    using CtxId = std::uint32_t;
+    using Obj = std::pair<NodeId, CtxId>;                 ///< object with heap context
+    using Var = std::pair<NodeId, CtxId>;                 ///< node in a context
+    using Field = std::tuple<NodeId, CtxId, FieldId>;     ///< field of a heap object
+    using ObjSet = std::set<Obj>;
 
-    bool addAll(std::set<NodeId>& into, const std::set<NodeId>& from);
-    std::set<NodeId> readField(NodeId object, FieldId field) const;
+    CtxId intern(const Ctx& ctx);
+    CtxId push(CallSiteId site, CtxId ctx, unsigned limit);
+    CtxId truncate(CtxId ctx, unsigned limit);
+
+    /// Context a node is read/written in, when its function runs in `ctx`
+    /// (globals are context-insensitive).
+    CtxId nodeCtx(NodeId n, CtxId ctx) const;
+    bool reach(const std::string& function, CtxId ctx);
+
+    bool addAll(ObjSet& into, const ObjSet& from);
+    ObjSet readField(const Obj& object, FieldId field) const;
+
+    bool applyIntra(const Edge& edge, CtxId ctx);
+    bool applyCall(const Edge& edge, CtxId callerCtx);
+    bool applyVirtualCall(CallSiteId site, CtxId callerCtx);
 
     const LDGraph& graph_;
-    std::vector<std::set<NodeId>> pts_;
-    std::map<FieldKey, std::set<NodeId>> heap_;
+    SolverOptions options_;
+
+    std::vector<Ctx> contexts_;
+    std::map<Ctx, CtxId> contextIds_;
+
+    std::map<Var, ObjSet> pts_;
+    std::map<Field, ObjSet> heap_;
+    std::map<std::string, std::set<CtxId>> methodCtx_;
+
+    /// Edges grouped by the function whose contexts drive them.
+    std::map<std::string, std::vector<EdgeId>> intraByFunction_;
+    std::map<std::string, std::vector<EdgeId>> callsByCaller_;
+    std::map<std::string, std::vector<CallSiteId>> virtualSitesByCaller_;
+
     std::size_t iterations_ = 0;
 };
 

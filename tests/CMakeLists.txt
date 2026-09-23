@@ -21,11 +21,19 @@ foreach(src IN LISTS LDC_TEST_SOURCES)
     COMMENT "IR: ${name}"
     VERBATIM)
   list(APPEND LDC_TEST_IR "${ll}")
-  add_test(NAME "${name}"
+  set(expect "${CMAKE_CURRENT_SOURCE_DIR}/expected/${name}.json")
+  # M2: L_FC at k = 0 must equal SVF Andersen on every variable.
+  add_test(NAME "${name}.andersen"
            COMMAND ldc -stat=false -ldc-andersen
-                   "-ldc-src=${src}"
-                   "-ldc-expect=${CMAKE_CURRENT_SOURCE_DIR}/expected/${name}.json"
-                   "${ll}")
+                   "-ldc-src=${src}" "-ldc-expect=${expect}" "${ll}")
+  # M3: the expected queries, per context depth and analysis.
+  foreach(k 0 1 2)
+    foreach(mode lfc kcfa)
+      add_test(NAME "${name}.${mode}.k${k}"
+               COMMAND ldc -stat=false -ldc-k=${k} -ldc-mode=${mode}
+                       "-ldc-src=${src}" "-ldc-expect=${expect}" "${ll}")
+    endforeach()
+  endforeach()
 endforeach()
 
 add_custom_target(test_ir ALL DEPENDS ${LDC_TEST_IR})
