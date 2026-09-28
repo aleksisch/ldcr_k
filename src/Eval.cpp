@@ -44,7 +44,7 @@ Row runSolver(const LDGraph& graph, Mode mode, unsigned k, const char* name)
 {
     Row row;
     row.name = name;
-    Solver solver(graph, SolverOptions{k, mode, false});
+    Solver solver(graph, SolverOptions{k, mode});
     const auto start = std::chrono::steady_clock::now();
     solver.solve();
     row.millis =

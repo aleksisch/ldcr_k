@@ -13,3 +13,6 @@ Each query lists the expected points-to set per mode, where known:
 - `ldc`  — L_DC_k (this project, phase 1);
 - `ldcr` — L_DCR_k (phase 2); never listed: it must equal `kcfa`.
 A mode that is absent means "same as `kcfa`".
+
+`"andersen": false` disables the `<name>.andersen` test (L_FC at k = 0 = SVF Andersen); the
+file's `note` says why.

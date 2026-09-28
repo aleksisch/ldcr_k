@@ -3,6 +3,7 @@
 #pragma once
 
 #include "ldc/LDGraph.h"
+#include "ldc/Solver.h"
 
 #include <iosfwd>
 

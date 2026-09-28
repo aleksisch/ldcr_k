@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <iosfwd>
+#include <map>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -19,6 +20,8 @@ namespace ldc
 using NodeId = std::uint32_t;
 using EdgeId = std::uint32_t;
 using SvfId = std::uint32_t;
+/// svfId of nodes with no SVF counterpart (synthetic objects of construction sites).
+inline constexpr SvfId kNoSvfId = 0xffffffffu;
 
 /// Call site index into LDGraph::callSites(), or kNoCallSite.
 using CallSiteId = std::int32_t;
@@ -36,6 +39,7 @@ inline constexpr FieldId kAnyField = -2;
 inline constexpr FieldId kRetField = -10;
 inline constexpr FieldId paramField(int i) { return kRetField - i; }
 inline constexpr bool isSyntheticField(FieldId f) { return f <= kRetField; }
+inline constexpr FieldId kDefaultFieldLimit = 512;
 
 /// Dynamic type (a class with a vtable), index into LDGraph::types(); kUnknownType for
 /// objects without one (plain structs, globals, ...).
@@ -89,6 +93,9 @@ struct Node
     std::string function; ///< enclosing function (demangled), empty for objects
     int line = 0;         ///< source line (objects: allocation line), 0 if unknown
     TypeId type = kUnknownType; ///< objects: dynamic type, known at allocation
+    /// Objects: number of (flattened) fields as SVF has it; offsets at or beyond it become
+    /// `*`. 0: SVF made the object field-insensitive. At most SVF's MaxFieldLimit (512).
+    FieldId fieldLimit = kDefaultFieldLimit;
 };
 
 struct Type
@@ -155,6 +162,14 @@ public:
     TypeId typeFor(const std::string& className, NodeId vtable);
     const std::vector<Type>& types() const { return types_; }
 
+    /// Dynamic type of the member subobject at `offset` of `object` (e.g. a polymorphic
+    /// member), kUnknownType if none. Offset 0 is the object itself (Node::type), or its first
+    /// member if the object's own class is not polymorphic.
+    TypeId subobjectType(NodeId object, FieldId offset) const;
+    void setSubobjectType(NodeId object, FieldId offset, TypeId type);
+    /// The dynamic types of all member subobjects of `object` (any offset).
+    const std::vector<TypeId>& memberTypes(NodeId object) const;
+
     const std::vector<Node>& nodes() const { return nodes_; }
     const std::vector<Edge>& edges() const { return edges_; }
     const std::vector<CallSite>& callSites() const { return callSites_; }
@@ -167,6 +182,8 @@ private:
     std::vector<Edge> edges_;
     std::vector<CallSite> callSites_;
     std::vector<Type> types_;
+    std::map<std::pair<NodeId, FieldId>, TypeId> subobjectTypes_;
+    std::map<NodeId, std::vector<TypeId>> memberTypes_;
     std::unordered_map<SvfId, NodeId> bySvf_;
 };
 

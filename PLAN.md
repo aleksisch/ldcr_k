@@ -234,6 +234,8 @@ CTest adds `<name>.ldc.k<0|1|2>`.
 | Object type recovery | the class of the constructor called directly on the allocated pointer (see §6, M3 findings) |
 | Declared type of a virtual call | clang `-fwhole-program-vtables` type tests (see §6, M5 findings) |
 | Stack / global objects with virtual methods | allocation site = `alloca` / global, type from ctor |
+| Placement new (pools) | each construction site `new (p) T(...)` is an object of class T (§6, real-program findings) |
+| Polymorphic members | member subobject ⟨O, off⟩ typed from `T::T(this + off)` in the owner's constructor |
 | Arrays, unions, casts | SVF's field model: array elements collapse onto the array's field; pointer arithmetic over struct fields = field `*`; casts = `assign` |
 | Interior pointers (`&o->member`) | field objects ⟨O, off⟩ via `gep[f]` edges (like SVF `GepObjVar`) |
 | Standard library | analyse only user code first; model `operator new`, ignore `std::` bodies |
@@ -317,6 +319,26 @@ Findings from M5 (numbers in `RESULTS.md`):
 - **Main result:** L_DC ⊇ kCFA always; L_DC removes 23–100 % of L_FC's extra objects; the
   remaining loss is dominated by DP-C1 in the visitor pattern (`expr`).
 
+Findings from the real program (tinyxml2; numbers in `RESULTS.md`):
+- **Types beyond `new T`.** Nodes are built with placement new in pool memory, and the pools
+  are members of `XMLDocument` (`MemPoolT<N>`, virtual `Alloc` / `Free`). Now: each
+  construction site is its own typed object (`Builder::assignTypes`, `Node::kNoSvfId`);
+  members constructed as `T::T(this + off)` in the owner's constructor type ⟨O, off⟩ for O's
+  class and subclasses, nested (`LDGraph::subobjectType`). Offset 0 is a base class unless T
+  is not a base (first member). `constructorClass` handles class templates (`T<N>::T`).
+- **Escaping geps** include returned values and phi/select operands (a returned `&buf[i]`
+  had no edge before).
+- **Offsets are bounded** by SVF's field limit; objects that SVF made field-insensitive
+  (limit 0 after Andersen) are field-insensitive here, and a receiver at offset `*` may have
+  the type of the object or of any polymorphic member (`Solver::receiverTypes`). Without the
+  bound, geps in loops created 40 k+ objects.
+- **Engine.** The round-robin `Solver` is replaced by difference propagation (interned
+  objects, `llvm::SparseBitVector`, functions instantiated per context when first reached).
+  The build now defaults to `RelWithDebInfo` (it had been `-O0`).
+- **Results:** L_DCR_k = kCFA fact by fact at k = 0, 1; L_DC is less precise than L_FC on this
+  program; SVF Andersen's call graph lacks 29 virtual call edges (so L_FC does too); k = 2
+  does not finish in 25 min for any mode.
+
 ---
 
 ## 7. Phase 2 — L_R → L_DCR_k  — status: **implemented** (`-ldc-mode=ldcr`)
@@ -362,6 +384,8 @@ differ from kCFA).
 
 - Demand-driven solver (single query from a variable; memoisation; budget) — the actual value
   over kCFA.
+- Scalability of the exhaustive solvers: k = 2 on tinyxml2 (cycle elimination, context-
+  insensitive pool objects, selective context sensitivity as in P3Ctx).
 - Clients: devirtualisation (monomorphic call sites), cast checks, may-alias queries.
 - Baselines: SVF `CFLAlias` (C++), Soot `soot.jimple.spark.ondemand.DemandCSPointsTo` (Java,
   available in the `p3ctx` image).

@@ -16,6 +16,7 @@
 #include <llvm/IR/Module.h>
 
 #include <optional>
+#include <set>
 #include <vector>
 
 #include <ostream>
@@ -36,7 +37,8 @@ void BuildStats::print(std::ostream& os) const
        << " skipped statements\n"
        << "Virtual calls: " << virtualSites << " sites, " << chaTargets << " CHA targets, "
        << andersenTargets << " Andersen targets, " << sitesWithoutDeclaredType
-       << " sites without a declared type\n";
+       << " sites without a declared type\n"
+       << "Construction sites (placement new): " << constructionSites << "\n";
 }
 
 namespace
@@ -121,8 +123,14 @@ private:
         if (!isObj)
             if (const FunObjVar* fun = var->getFunction())
                 function = demangle(fun->getName());
-        return graph_.nodeFor(var->getId(), isObj ? NodeKind::Obj : NodeKind::Var, name,
-                              function, parseLine(var->getSourceLoc()));
+        const NodeId id = graph_.nodeFor(var->getId(), isObj ? NodeKind::Obj : NodeKind::Var,
+                                         name, function, parseLine(var->getSourceLoc()));
+        // Field limit as SVF has it after Andersen: 0 = SVF made the object field-insensitive
+        // (e.g. after pointer arithmetic over its fields); we follow, so all fields are `*`.
+        if (const auto* object = SVFUtil::dyn_cast<BaseObjVar>(var))
+            graph_.node(id).fieldLimit =
+                static_cast<FieldId>(std::min<u32_t>(object->getMaxFieldOffsetLimit(), kDefaultFieldLimit));
+        return id;
     }
 
     void edge(const SVFVar* src, const SVFVar* dst, Label label, FieldId field = kNoField,
@@ -190,7 +198,7 @@ private:
         return {base, field};
     }
 
-    /// A gep result used as a value (stored, copied, passed): the vptr `&vtable[2]` stored by
+    /// A gep result used as a value (stored, copied, passed, returned, merged by phi/select): the vptr `&vtable[2]` stored by
     /// constructors, `&obj->member` passed as `this` of a member's method, ... It becomes
     /// `base --gep[f]--> q`: q points to the field objects ⟨O, off + f⟩ (like SVF's GepObjVar).
     /// Dropping the offset instead merges a member object with field 0 of its container.
@@ -217,6 +225,16 @@ private:
             check(SVFUtil::cast<StoreStmt>(stmt)->getRHSVar()); // stored value, not the address
         for (const SVFStmt* stmt : pag_.getSVFStmtSet(SVFStmt::Call))
             for (const ValVar* op : SVFUtil::cast<CallPE>(stmt)->getOpndVars())
+                check(op);
+        for (const SVFStmt* stmt : pag_.getSVFStmtSet(SVFStmt::Ret))
+            check(SVFUtil::cast<RetPE>(stmt)->getRHSVar()); // returned
+        for (const auto& entry : pag_.getFunRets())
+            check(entry.second); // returned (also from functions without callers)
+        for (const SVFStmt* stmt : pag_.getSVFStmtSet(SVFStmt::Phi))
+            for (const ValVar* op : SVFUtil::cast<PhiStmt>(stmt)->getOpndVars())
+                check(op);
+        for (const SVFStmt* stmt : pag_.getSVFStmtSet(SVFStmt::Select))
+            for (const ValVar* op : SVFUtil::cast<SelectStmt>(stmt)->getOpndVars())
                 check(op);
         stats_.escapingGeps = escaping.size();
     }
@@ -504,7 +522,8 @@ private:
         return false;
     }
 
-    /// "ns::X::X(int)" -> "ns::X"; empty if `function` is not a constructor.
+    /// "ns::X::X(int)" -> "ns::X", "ns::T<1>::T()" -> "ns::T<1>"; empty if `function` is not a
+    /// constructor.
     static std::string constructorClass(const std::string& function)
     {
         const std::string qualified = function.substr(0, function.find('('));
@@ -513,9 +532,28 @@ private:
             return "";
         const std::string cls = qualified.substr(0, sep);
         const std::size_t clsSep = cls.rfind("::");
-        const std::string clsLast = clsSep == std::string::npos ? cls : cls.substr(clsSep + 2);
+        std::string clsLast = clsSep == std::string::npos ? cls : cls.substr(clsSep + 2);
+        clsLast = clsLast.substr(0, clsLast.find('<')); // "MemPoolT<120ul>" -> "MemPoolT"
         return qualified.substr(sep + 2) == clsLast ? cls : "";
     }
+
+    // Beyond `new T(...)`, C++ constructs objects in memory that is not a fresh allocation:
+    //  - placement new, `new (pool.Alloc()) T(...)`: the memory is some pool block. Such a
+    //    *construction site* gets its own object of class T (`O --new[T]--> p`), next to the
+    //    pool memory p already points to;
+    //  - member subobjects, `T member;` in class C: C's constructor calls T::T(this + off).
+    //    Recorded as (C, off, T); every object of class C (or a subclass) then has a T at off,
+    //    also nested. An interior pointer ⟨O, off⟩ dispatches by that type.
+    //  - base classes: B::B(this) from C's constructor, offset 0 — the same object.
+    // Only classes that matter for dispatch get construction-site objects: polymorphic ones
+    // and those with polymorphic members.
+
+    struct Member
+    {
+        std::string owner;
+        FieldId offset;
+        std::string cls;
+    };
 
     void assignTypes()
     {
@@ -533,6 +571,36 @@ private:
             if (e.label == Label::New)
                 allocatedInto[e.dst].push_back(e.src);
 
+        // Pointers derived from a constructor's own `this`, with their offset.
+        std::unordered_map<NodeId, FieldId> thisOffset;
+        for (NodeId n = 0; n < graph_.nodes().size(); ++n)
+        {
+            const Node& var = graph_.nodes()[n];
+            if (var.kind == NodeKind::Var && var.name == "this" && !constructorClass(var.function).empty())
+                thisOffset[n] = 0;
+        }
+        for (bool changed = true; changed;)
+        {
+            changed = false;
+            for (const Edge& e : graph_.edges())
+            {
+                if (e.dir != CallDir::None || e.encoding != Encoding::Common ||
+                    (e.label != Label::Assign && e.label != Label::Gep))
+                    continue;
+                auto from = thisOffset.find(e.src);
+                if (from == thisOffset.end() || thisOffset.count(e.dst) != 0 ||
+                    graph_.nodes()[e.dst].function != graph_.nodes()[e.src].function)
+                    continue;
+                if (e.label == Label::Gep && (e.field < 0 || from->second < 0))
+                    continue;
+                thisOffset[e.dst] = from->second + (e.label == Label::Gep ? e.field : 0);
+                changed = true;
+            }
+        }
+
+        std::unordered_map<NodeId, std::string> objectClass;
+        std::vector<Member> members;
+        std::vector<std::pair<EdgeId, std::string>> placements; // ctor call edge, class
         for (EdgeId id = 0; id < graph_.edges().size(); ++id)
         {
             const Edge& e = graph_.edges()[id];
@@ -540,12 +608,74 @@ private:
             if (e.dir != CallDir::Enter || formal.name != "this")
                 continue;
             const std::string cls = constructorClass(formal.function);
-            auto vtable = vtableByClass.find(cls);
-            if (cls.empty() || vtable == vtableByClass.end())
+            if (cls.empty())
                 continue;
-            const TypeId type = graph_.typeFor(cls, vtable->second);
-            for (NodeId object : allocatedInto[e.src])
-                graph_.node(object).type = type;
+            if (auto it = allocatedInto.find(e.src); it != allocatedInto.end())
+            {
+                for (NodeId object : it->second)
+                    objectClass[object] = cls;
+                continue;
+            }
+            if (auto it = thisOffset.find(e.src); it != thisOffset.end())
+            {
+                const std::string owner = constructorClass(graph_.nodes()[e.src].function);
+                // Offset 0 is a base-class constructor, unless cls is not a base of owner
+                // (then it is the first member).
+                if (!owner.empty() && (it->second > 0 || !derives(owner, cls)))
+                    members.push_back({owner, it->second, cls});
+                continue;
+            }
+            placements.push_back({id, cls});
+        }
+
+        // Classes that matter for dispatch: polymorphic, or with such a member (transitively).
+        std::set<std::string> relevantClasses;
+        for (const auto& entry : vtableByClass)
+            relevantClasses.insert(entry.first);
+        for (bool changed = true; changed;)
+        {
+            changed = false;
+            for (const Member& m : members)
+                if (relevantClasses.count(m.cls) != 0 && relevantClasses.insert(m.owner).second)
+                    changed = true;
+        }
+
+        for (const auto& [id, cls] : placements)
+        {
+            if (relevantClasses.count(cls) == 0)
+                continue;
+            const Edge call = graph_.edges()[id];
+            const CallSite& site = graph_.callSites()[static_cast<std::size_t>(call.callSite)];
+            const NodeId object = graph_.addNode(Node{NodeKind::Obj, kNoSvfId,
+                                                      cls + "@" + std::to_string(site.line), "",
+                                                      site.line});
+            addEdge(object, call.src, Label::New);
+            objectClass[object] = cls;
+            ++stats_.constructionSites;
+        }
+
+        auto typeOf = [&](const std::string& cls) {
+            auto vtable = vtableByClass.find(cls);
+            return vtable == vtableByClass.end() ? kUnknownType : graph_.typeFor(cls, vtable->second);
+        };
+        for (const auto& [object, cls] : objectClass)
+        {
+            graph_.node(object).type = typeOf(cls);
+            // Member subobjects of cls and of its bases, nested.
+            std::vector<std::pair<std::string, FieldId>> pending{{cls, 0}};
+            for (std::size_t i = 0; i < pending.size() && i < 256; ++i)
+            {
+                const auto [owner, base] = pending[i];
+                for (const Member& m : members)
+                {
+                    if (!derives(owner, m.owner))
+                        continue;
+                    const FieldId offset = base + m.offset;
+                    if (TypeId type = typeOf(m.cls); type != kUnknownType)
+                        graph_.setSubobjectType(object, offset, type);
+                    pending.push_back({m.cls, offset});
+                }
+            }
         }
 
         for (CallSiteId c = 0; c < static_cast<CallSiteId>(graph_.callSites().size()); ++c)

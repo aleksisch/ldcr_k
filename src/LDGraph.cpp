@@ -1,5 +1,6 @@
 #include "ldc/LDGraph.h"
 
+#include <algorithm>
 #include <array>
 #include <ostream>
 
@@ -72,6 +73,29 @@ TypeId LDGraph::typeFor(const std::string& className, NodeId vtable)
             return t;
     types_.push_back(Type{className, vtable});
     return static_cast<TypeId>(types_.size() - 1);
+}
+
+TypeId LDGraph::subobjectType(NodeId object, FieldId offset) const
+{
+    if (offset == 0 && nodes_[object].type != kUnknownType)
+        return nodes_[object].type;
+    auto it = subobjectTypes_.find({object, offset});
+    return it == subobjectTypes_.end() ? kUnknownType : it->second;
+}
+
+void LDGraph::setSubobjectType(NodeId object, FieldId offset, TypeId type)
+{
+    subobjectTypes_[{object, offset}] = type;
+    std::vector<TypeId>& types = memberTypes_[object];
+    if (std::find(types.begin(), types.end(), type) == types.end())
+        types.push_back(type);
+}
+
+const std::vector<TypeId>& LDGraph::memberTypes(NodeId object) const
+{
+    static const std::vector<TypeId> none;
+    auto it = memberTypes_.find(object);
+    return it == memberTypes_.end() ? none : it->second;
 }
 
 void LDGraph::printSummary(std::ostream& os) const

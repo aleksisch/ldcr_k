@@ -21,3 +21,4 @@ function(ldc_compile_ir src out_var)
     VERBATIM)
   set(${out_var} "${ll}" PARENT_SCOPE)
 endfunction()
+

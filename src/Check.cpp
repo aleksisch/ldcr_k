@@ -45,7 +45,8 @@ std::size_t compareWithAndersen(const LDGraph& graph, const Solver& solver,
 
         std::set<SvfId> ours;
         for (NodeId object : solver.pts(n))
-            ours.insert(graph.nodes()[object].svfId);
+            if (graph.nodes()[object].svfId != kNoSvfId) // construction-site objects: ours only
+                ours.insert(graph.nodes()[object].svfId);
 
         std::set<SvfId> theirs;
         for (SVF::NodeID o : andersen.getPts(node.svfId))
