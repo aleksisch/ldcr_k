@@ -13,7 +13,6 @@
 
 #include <cstddef>
 #include <iosfwd>
-#include <unordered_set>
 
 namespace SVF
 {
@@ -36,7 +35,6 @@ struct BuildStats
     std::size_t andersenTargets = 0;  ///< (site, method) pairs in the Andersen call graph
     std::size_t sitesWithoutDeclaredType = 0; ///< virtual sites whose static class is unknown
     std::size_t constructionSites = 0; ///< objects created for placement-new constructions
-    std::unordered_set<SvfId> escapingGepIds; ///< modelled as `base --assign--> gep` (offset dropped)
 
     void print(std::ostream& os) const;
 };
