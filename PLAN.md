@@ -144,7 +144,9 @@ tests/expected/            <name>.json  hand-written expected PTS for queried va
 tests/CMakeLists.txt
 ```
 
-`ldc` CLI: `ldc <file.ll> --k=<n> --mode={lfc,ldc,kcfa} [--query=<var>] [--dot=<out>] [--json=<out>]`.
+`ldc` CLI: options go through SVF's parser (`-ldc-*`), so they coexist with SVF's own:
+`ldc [-ldc-dot=<out>] <file.ll>`; to come: `-ldc-k=<n>`, `-ldc-mode={lfc,ldc,kcfa}`,
+`-ldc-query=<var>`, `-ldc-json=<out>`.
 
 ---
 
@@ -226,13 +228,21 @@ Three purposes:
 
 ---
 
-## 6. Open questions to settle early
+## 6. Findings about SVFIR (settled in M1)
 
-- Which SVF API gives the virtual-call-site structure (vtable slot index, receiver) on LLVM 21?
-  If none works reliably, match the IR pattern ourselves in `Dispatch`.
-- How SVF represents field paths (`Gep` offsets, `vgep`) — defines our `f`.
-- Whether `CallPE`/`RetPE` for virtual calls exist in SVFIR before Andersen, or only after the
-  call graph is resolved (affects the order of `Builder` and `Dispatch`).
+- **Virtual call sites** are recognised by SVF on LLVM 21: `CallICFGNode::isVirtualCall()`,
+  `getVtablePtr()`, `getFunIdxInVtable()`, `getActualParms()`. In IR the dispatch is visible as
+  `r --load[0]--> vtable --load[0]--> fnptr`.
+- **Calls:** `CallPE` is a multi-operand statement (formal ← one actual per call site),
+  `RetPE` is formal return → actual return. Both exist **only for direct calls**. Indirect and
+  virtual call sites have no call/return statements in SVFIR (Andersen connects them only in its
+  own constraint graph), so `Builder` wires them from Andersen's call graph.
+- **Fields:** SVFIR models `p->f = v` as `q = gep p, f; *q = v`. `Builder` folds the gep into the
+  load/store: `v --store[f]--> p`, with `f` = flattened constant offset; a direct `*p` is field 0;
+  a variable offset is field `*`. A gep result used as a value ("escaping gep") is counted and
+  reported; in the tests these are the vptr stores in constructors.
+- **Noise** kept in LDGraph for now: vtable / typeinfo globals and function objects. The vtable
+  stores in constructors are the input for type recovery in M4.
 
 ---
 

@@ -8,7 +8,11 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # SVF_DIR / LLVM_DIR / Z3_DIR come from the environment (see Dockerfile).
 find_package(SVF CONFIG REQUIRED)
 
-add_executable(ldc src/main.cpp)
+add_executable(ldc
+  src/main.cpp
+  src/LDGraph.cpp
+  src/Builder.cpp)
+target_include_directories(ldc PRIVATE include)
 target_link_libraries(ldc PRIVATE SVF::SvfLLVM SVF::SvfCore)
 
 enable_testing()

@@ -14,7 +14,7 @@ foreach(src IN LISTS LDC_TEST_SOURCES)
   set(ll  "${CMAKE_CURRENT_BINARY_DIR}/${name}.ll")
   add_custom_command(
     OUTPUT "${ll}"
-    COMMAND "${LDC_CLANGXX}" -S -c -g -fno-discard-value-names
+    COMMAND "${LDC_CLANGXX}" -S -g -fno-discard-value-names
             -Xclang -disable-O0-optnone -emit-llvm "${src}" -o "${raw}"
     COMMAND "${LDC_OPT}" -S -p=mem2reg "${raw}" -o "${ll}"
     DEPENDS "${src}"
