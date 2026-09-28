@@ -124,9 +124,13 @@ CMake drives test compilation: for each `tests/cpp/*.cpp`, an `add_custom_comman
 `.ll` (clang++ → opt mem2reg), and an `add_test` runs `ldc` on it and compares the result with
 `tests/expected/<name>.json`.
 
-Known pitfall from the first SVF trial (`../cpp-pag/`): SVF's `-v-call-cha` produced **no**
-virtual-call edges on our Fig. 3 port; Andersen's final call graph was correct.
-Use Andersen candidates.
+Known pitfalls with the `svftools/svf` image:
+- SVF's `-v-call-cha` produced **no** virtual-call edges on our Fig. 3 port (`../cpp-pag/`);
+  Andersen's final call graph was correct. Use Andersen candidates.
+- `SVF::SvfLLVM` exports a non-existent include dir (`Release-build/include/SVF`); CMake refuses
+  to generate. The `Dockerfile` creates it.
+- `LLVMModuleSet::preProcessBCs()` (used by SVF's `svf-ex`) writes `<name>.pre.bc`, fails with
+  "Bad file descriptor", and segfaults — `svf-ex` itself crashes. `ldc` follows `wpa` and skips it.
 
 ### 3.1 Repo layout (target)
 

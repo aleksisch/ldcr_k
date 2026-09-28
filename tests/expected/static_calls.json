@@ -1,0 +1,7 @@
+{
+  "queries": [
+    { "var": "main::x", "k": 0, "kcfa": ["oa", "ob"] },
+    { "var": "main::x", "k": 1, "kcfa": ["oa"] },
+    { "var": "main::y", "k": 1, "kcfa": ["ob"] }
+  ]
+}

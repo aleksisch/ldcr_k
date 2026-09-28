@@ -1,0 +1,7 @@
+{
+  "note": "Paper Fig. 5: one context, two receiver objects. L_FC lets each object reach both targets.",
+  "queries": [
+    { "var": "E::foo::this", "k": 0, "kcfa": ["e1"], "lfc": ["e1", "f1"] },
+    { "var": "F::foo::this", "k": 0, "kcfa": ["f1"], "lfc": ["e1", "f1"] }
+  ]
+}

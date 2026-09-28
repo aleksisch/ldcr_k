@@ -1,0 +1,10 @@
+{
+  "note": "k = 1 is not enough: d1 has heap context k-1 = 0, so d1.f merges o1 and o2.",
+  "queries": [
+    { "var": "A::foo::v", "k": 1, "kcfa": ["o1", "o2"] },
+    { "var": "A::foo::v", "k": 2, "kcfa": ["o1"] }
+  ],
+  "call_targets": [
+    { "site": "bar::c3", "k": 0, "kcfa": ["A::foo", "B::foo"] }
+  ]
+}
