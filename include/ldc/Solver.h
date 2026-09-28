@@ -304,8 +304,8 @@ private:
 
     std::vector<Cell> cells_;
     std::map<CellKey, CellId> cellIds_;
-    std::map<ObjectKey, std::vector<CellId>> realCells_;       ///< real-field cells of an object
     std::map<ObjectKey, std::vector<VarId>> allFieldReaders_;  ///< load[*] readers of an object
+    std::map<ObjectKey, Bits> allFields_; ///< union of all real cells of an object (load[*])
     std::unordered_set<std::uint64_t> subscribed_;             ///< (cell, reader)
     std::set<std::pair<ObjectKey, VarId>> subscribedAll_;
 

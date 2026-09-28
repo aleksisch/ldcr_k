@@ -238,8 +238,8 @@ void Solver::add(VarId v, ObjId object)
 void Solver::addBits(VarId v, const Bits& objects)
 {
     VarInfo& info = vars_[v];
-    Bits fresh = objects;
-    fresh.intersectWithComplement(info.pts);
+    Bits fresh;
+    fresh.intersectWithComplement(objects, info.pts); // objects \ pts, without copying objects
     if (fresh.empty())
         return;
     info.pts |= fresh;
@@ -252,7 +252,10 @@ void Solver::copyInto(const CopyEdge& edge, const Bits& objects)
 {
     if (!edge.gep)
     {
-        addBits(edge.dst, plain(objects));
+        if (anyTagged_)
+            addBits(edge.dst, plain(objects));
+        else
+            addBits(edge.dst, objects);
         return;
     }
     Bits moved;
@@ -270,6 +273,11 @@ void Solver::addCopy(VarId src, CopyEdge edge)
 
 // ---- heap ------------------------------------------------------------------------------
 
+namespace
+{
+constexpr NodeId kInstanceCellNode = 0xffffffffu; ///< owner of Ldcr's per-instance cells
+} // namespace
+
 bool Solver::cellKey(const Obj& object, const FieldEdge& edge, CellKey& key) const
 {
     const FieldId field = shift(object.node, object.offset, edge.field);
@@ -278,13 +286,18 @@ bool Solver::cellKey(const Obj& object, const FieldEdge& edge, CellKey& key) con
     case Instance::None:
         key = {object.node, object.ctx, field, kNoCallSite, 0};
         return true;
+    // A dispatch instance's cells do not depend on the receiver object: every receiver tagged
+    // (c, C) was dispatched from r#c in C, so it is in pts(r) in C and its per-object cell would
+    // hold exactly the arguments stored at (c, C); the result, read in C over pts(r), is the
+    // union either way. Keying by (field, c, C) alone gives the same facts and one cell per
+    // instance, not per object.
     case Instance::Edge:
-        key = {object.node, object.ctx, field, edge.site, edge.ctx};
+        key = {kInstanceCellNode, 0, edge.field, edge.site, edge.ctx};
         return true;
     case Instance::Object:
         if (object.tagSite == kNoCallSite)
             return false; // `this` reached by a direct call: its arguments flow by assign edges
-        key = {object.node, object.ctx, field, object.tagSite, object.tagCtx};
+        key = {kInstanceCellNode, 0, edge.field, object.tagSite, object.tagCtx};
         return true;
     }
     return false;
@@ -298,29 +311,36 @@ Solver::CellId Solver::cell(const CellKey& key)
         const ObjectKey object{std::get<0>(key), std::get<1>(key)};
         const bool real = !isSyntheticField(std::get<2>(key));
         cells_.push_back(Cell{object, real, {}, {}});
-        if (real)
-            realCells_[object].push_back(it->second);
     }
     return it->second;
 }
 
 void Solver::store(CellId c, const Bits& values)
 {
-    Bits fresh = plain(values);
-    fresh.intersectWithComplement(cells_[c].objects);
+    Bits fresh;
+    if (anyTagged_)
+        fresh.intersectWithComplement(plain(values), cells_[c].objects);
+    else
+        fresh.intersectWithComplement(values, cells_[c].objects);
     if (fresh.empty())
         return;
     cells_[c].objects |= fresh;
-    const std::vector<VarId> readers = cells_[c].readers;
-    for (VarId reader : readers)
+    // addBits only touches variables and the worklist, so the reader lists stay valid.
+    for (VarId reader : cells_[c].readers)
         addBits(reader, fresh);
-    if (cells_[c].real)
-        if (auto it = allFieldReaders_.find(cells_[c].object); it != allFieldReaders_.end())
-        {
-            const std::vector<VarId> all = it->second;
-            for (VarId reader : all)
-                addBits(reader, fresh);
-        }
+    if (!cells_[c].real)
+        return;
+    // load[*] readers see the union of all real cells of the object: notify them only of
+    // objects new to that union (otherwise an object arrives once per cell holding it).
+    Bits& all = allFields_[cells_[c].object];
+    Bits freshForAll;
+    freshForAll.intersectWithComplement(fresh, all);
+    if (freshForAll.empty())
+        return;
+    all |= freshForAll;
+    if (auto it = allFieldReaders_.find(cells_[c].object); it != allFieldReaders_.end())
+        for (VarId reader : it->second)
+            addBits(reader, freshForAll);
 }
 
 void Solver::subscribe(CellId c, VarId reader)
@@ -338,14 +358,10 @@ void Solver::subscribeAllFields(const ObjectKey& object, VarId reader)
     if (!subscribedAll_.insert({object, reader}).second)
         return;
     allFieldReaders_[object].push_back(reader);
-    if (auto it = realCells_.find(object); it != realCells_.end())
+    if (auto it = allFields_.find(object); it != allFields_.end())
     {
-        const std::vector<CellId> cells = it->second;
-        for (CellId c : cells)
-        {
-            const Bits current = cells_[c].objects;
-            addBits(reader, current);
-        }
+        const Bits current = it->second;
+        addBits(reader, current);
     }
 }
 
@@ -619,7 +635,6 @@ void Solver::solve()
         propagate(v);
     }
 }
-
 // ---- results ---------------------------------------------------------------------------
 
 std::set<NodeId> Solver::pts(NodeId n) const
