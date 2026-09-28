@@ -361,7 +361,8 @@ Tags live only in `this` of the dispatched method; every other edge drops them.
 (`ldc -ldc-eval` checks it; CTest `<program>.eval.k<k>` fails otherwise). A negative control
 (comparing L_DC instead) reports 2 / 10 / 2613 differing pairs on `fig8` / `eq15` / `expr`.
 
-**Proof sketch** (inclusion form, induction on derivations; all other rules are shared):
+**Proof sketch** (inclusion form, induction on derivations; all other rules are shared; the full
+proof, with the exact rules of both modes, is in `PROOF.md`):
 - kCFA ⊆ L_DCR: an [I-VCall] firing for (c, C, O ∈ pts(r, C), m′ = dispatch(c, type O)) adds
   O to this^m′, pts(a_i, C) to p_i^m′ and ret^m′ to x in C, with callee context ⌈c :: C⌉_k.
   L_DCR derives the same: dispatch adds O^(c,C) to this^m′; storeInstance puts pts(a_i, C)
