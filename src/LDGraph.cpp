@@ -9,7 +9,7 @@ namespace ldc
 namespace
 {
 
-const char* const kLabelNames[] = {"new", "assign", "store", "load", "dispatch"};
+const char* const kLabelNames[] = {"new", "assign", "store", "load", "dispatch", "gep"};
 
 std::string edgeLabel(const Edge& edge)
 {

@@ -109,7 +109,7 @@ Call graph: the `dispatch[t]` edges that lie on accepted paths, with their conte
 | Language | C++17 |
 | Build | **CMake** + CTest |
 | SVF + LLVM | `svftools/svf:latest` image (SVF 3.4, LLVM 21.1.0); `find_package(SVF CONFIG)` via `SVF_DIR=/home/SVF-tools/SVF/Release-build/lib/cmake/SVF`, `LLVM_DIR` from the same image |
-| Test front end | `clang++` 21 from the image; `-O0 -Xclang -disable-O0-optnone -fno-discard-value-names -g`, then `opt -p=mem2reg` |
+| Test front end | `clang++` 21 from the image; `-O0 -Xclang -disable-O0-optnone -fno-discard-value-names -g -flto -fwhole-program-vtables`, then `opt -p=mem2reg` (`cmake/LdcIR.cmake`) |
 | Dispatch candidates | L_D and kCFA: CHA from the vtable slots (as the paper). L_FC: SVF Andersen call graph |
 | Reference oracle | our own kCFA (paper Fig. 1 rules) on LDGraph |
 
@@ -148,7 +148,8 @@ tests/CMakeLists.txt
 
 `ldc` CLI: options go through SVF's parser (`-ldc-*`), so they coexist with SVF's own:
 `ldc [-ldc-dot=<out>] [-ldc-k=<n>] [-ldc-mode={lfc,kcfa,ldc}] [-ldc-src=<cpp>]
-[-ldc-expect=<json>] [-ldc-andersen] <file.ll>`; to come: `-ldc-query=<var>`, `-ldc-json=<out>`.
+[-ldc-expect=<json>] [-ldc-andersen] [-ldc-eval] <file.ll>`;
+to come: `-ldc-query=<var>`, `-ldc-json=<out>`.
 
 ---
 
@@ -215,7 +216,7 @@ CTest runs every test as `<name>.andersen` (M2) and `<name>.<lfc|kcfa>.k<0|1|2>`
 
 CTest adds `<name>.ldc.k<0|1|2>`.
 
-### M5 — Evaluation (phase 1)
+### M5 — Evaluation (phase 1)  — status: **done**, see `RESULTS.md`
 - Table per test: |PTS|, spurious receivers, call edges per context — for
   L_FC_k, L_DC_k, kCFA, SVF Andersen.
 - Small real programs (a few hundred lines of C++ with a class hierarchy).
@@ -231,8 +232,10 @@ CTest adds `<name>.ldc.k<0|1|2>`.
 | Function pointers (no receiver) | handled like static calls with Andersen targets (L_FC style); no `dispatch[t]` |
 | Pointer-to-member-function calls | out of scope; report |
 | Object type recovery | the class of the constructor called directly on the allocated pointer (see §6, M3 findings) |
+| Declared type of a virtual call | clang `-fwhole-program-vtables` type tests (see §6, M5 findings) |
 | Stack / global objects with virtual methods | allocation site = `alloca` / global, type from ctor |
-| Arrays, unions, casts | inherit SVF's field model; casts = `assign` |
+| Arrays, unions, casts | SVF's field model: array elements collapse onto the array's field; pointer arithmetic over struct fields = field `*`; casts = `assign` |
+| Interior pointers (`&o->member`) | field objects ⟨O, off⟩ via `gep[f]` edges (like SVF `GepObjVar`) |
 | Standard library | analyse only user code first; model `operator new`, ignore `std::` bodies |
 
 ---
@@ -297,6 +300,22 @@ Findings from M4:
 - **CHA targets** from vtable slots (no declared-type filter): `fig3` has 3 (`C::foo` included);
   L_D never reaches `C::foo`, since no object of type C flows to `x`.
 - L_DC_k = kCFA on `static_calls`, `fields`, `fig3`, `fig5` for k = 0, 1, 2.
+
+Findings from M5 (numbers in `RESULTS.md`):
+- **DeclTypeOf(r) is required.** Slot-only CHA sends a call to methods of unrelated
+  hierarchies that share the slot index (`root->handle(e)` → `Copy::run`). SVF's
+  `getFunNameOfVirtualCall()` is empty: it reads "VCallFunName" metadata that only SVF's
+  preprocessing adds — also the reason SVF's CHG found no targets (M3). Instead, IR is compiled
+  with `-fwhole-program-vtables`, and `Builder::declaredClass` reads the class from
+  `llvm.public.type.test(%vtable, !"_ZTS<class>")`; the hierarchy comes from debug info
+  (`DW_TAG_inheritance`).
+- **Memory model fixes** (all analyses): array index → array's field (`getConstantStructFldIdx`),
+  only variant-field geps → `*`; escaping geps → `gep[f]` edges and objects ⟨O, h, off⟩ in the
+  solver. Dropping the offset merged `bus.history.items` with `bus.root`.
+- **L_FC k = 0 = Andersen holds on the unit tests only**; on the evaluation programs 10–61
+  variables differ (memory-model details). kCFA ⊆ Andersen on all three programs.
+- **Main result:** L_DC ⊇ kCFA always; L_DC removes 23–100 % of L_FC's extra objects; the
+  remaining loss is dominated by DP-C1 in the visitor pattern (`expr`).
 
 ---
 

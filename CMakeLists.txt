@@ -14,9 +14,13 @@ add_executable(ldc
   src/Builder.cpp
   src/Names.cpp
   src/Solver.cpp
-  src/Check.cpp)
+  src/Check.cpp
+  src/Eval.cpp)
 target_include_directories(ldc PRIVATE include)
 target_link_libraries(ldc PRIVATE SVF::SvfLLVM SVF::SvfCore)
 
+include(cmake/LdcIR.cmake)
+
 enable_testing()
 add_subdirectory(tests)
+add_subdirectory(eval)

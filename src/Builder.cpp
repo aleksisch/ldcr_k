@@ -8,7 +8,9 @@
 #include "SVF-LLVM/LLVMModule.h"
 
 #include <llvm/Demangle/Demangle.h>
+#include <llvm/BinaryFormat/Dwarf.h>
 #include <llvm/IR/Constants.h>
+#include <llvm/IR/DebugInfo.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/GlobalVariable.h>
 #include <llvm/IR/Module.h>
@@ -33,7 +35,8 @@ void BuildStats::print(std::ostream& os) const
        << " variable-offset geps, " << escapingGeps << " escaping geps, " << skippedStmts
        << " skipped statements\n"
        << "Virtual calls: " << virtualSites << " sites, " << chaTargets << " CHA targets, "
-       << andersenTargets << " Andersen targets\n";
+       << andersenTargets << " Andersen targets, " << sitesWithoutDeclaredType
+       << " sites without a declared type\n";
 }
 
 namespace
@@ -160,9 +163,12 @@ private:
         for (const SVFStmt* stmt : pag_.getSVFStmtSet(SVFStmt::Gep))
         {
             const auto* gep = SVFUtil::cast<GepStmt>(stmt);
+            // As SVF's own field model: array indices (constant or not) are ignored, so an
+            // element access lands on the array's first field; only pointer arithmetic over
+            // struct fields (a "variant field" gep) loses the field.
             FieldId field = kAnyField;
-            if (gep->isConstantOffset())
-                field = static_cast<FieldId>(gep->accumulateConstantOffset());
+            if (!gep->isVariantFieldGep())
+                field = static_cast<FieldId>(gep->getConstantStructFldIdx());
             else
                 ++stats_.variantGeps;
             gepDef_[gep->getLHSVarID()] = {gep->getRHSVar(), field};
@@ -184,14 +190,18 @@ private:
         return {base, field};
     }
 
-    /// A gep result used as a value (stored, copied, passed) — in C++ mostly the vptr
-    /// `&vtable[2]` stored by constructors. LDGraph has no "pointer to field" values, so it
-    /// gets the objects of its base (the field offset is dropped). This is what M4 reads
-    /// to recover dynamic types: an object's field 0 holds its class's vtable.
+    /// A gep result used as a value (stored, copied, passed): the vptr `&vtable[2]` stored by
+    /// constructors, `&obj->member` passed as `this` of a member's method, ... It becomes
+    /// `base --gep[f]--> q`: q points to the field objects ⟨O, off + f⟩ (like SVF's GepObjVar).
+    /// Dropping the offset instead merges a member object with field 0 of its container.
     void addEscapingGeps()
     {
         for (SvfId id : stats_.escapingGepIds)
-            edge(gepDef_.at(id).first, pag_.getGNode(id), Label::Assign);
+        {
+            const SVFVar* gep = pag_.getGNode(id);
+            const auto [base, field] = resolveAddress(gep);
+            edge(base, gep, Label::Gep, field);
+        }
     }
 
     void findEscapingGeps()
@@ -409,6 +419,91 @@ private:
     // pointer. (Reading the vptr from field 0 does not work flow-insensitively: base
     // constructors store their own vtable there first.)
 
+    // ---- class hierarchy (for DeclTypeOf filtering), from debug info -----------
+
+    static std::string stripPrefix(const std::string& text, const std::string& prefix)
+    {
+        return text.rfind(prefix, 0) == 0 ? text.substr(prefix.size()) : "";
+    }
+
+    /// DeclTypeOf(r) of a virtual call. SVF's getFunNameOfVirtualCall() is empty here: it
+    /// comes from "VCallFunName" metadata that only SVF's preprocessing adds (and that is also
+    /// why SVF's CHG finds no targets). Instead, the IR is compiled with
+    /// -fwhole-program-vtables: clang then tests the loaded vtable against the static class,
+    /// `llvm.public.type.test(%vtable, !"_ZTS<class>")`.
+    static std::string declaredClass(const CallICFGNode* cs)
+    {
+        const llvm::Value* vtable = LLVMModuleSet::getLLVMModuleSet()->getLLVMValue(cs->getVtablePtr());
+        if (vtable == nullptr)
+            return "";
+        for (const llvm::User* user : vtable->users())
+        {
+            const auto* call = llvm::dyn_cast<llvm::CallBase>(user);
+            const llvm::Function* callee = call ? call->getCalledFunction() : nullptr;
+            if (callee == nullptr || (callee->getName() != "llvm.public.type.test" &&
+                                      callee->getName() != "llvm.type.test"))
+                continue;
+            if (const auto* md = llvm::dyn_cast<llvm::MetadataAsValue>(call->getArgOperand(1)))
+                if (const auto* id = llvm::dyn_cast<llvm::MDString>(md->getMetadata()))
+                    return stripPrefix(demangle(id->getString().str()), "typeinfo name for ");
+        }
+        return "";
+    }
+
+    static std::string vtableClass(const llvm::GlobalVariable* vtable)
+    {
+        return stripPrefix(demangle(vtable->getName().str()), "vtable for ");
+    }
+
+    /// Class name of a C++ debug-info type, from its ODR identifier (_ZTS...).
+    static std::string debugClass(const llvm::DICompositeType* type)
+    {
+        if (type == nullptr || type->getIdentifier().empty())
+            return "";
+        return stripPrefix(demangle(type->getIdentifier().str()), "typeinfo name for ");
+    }
+
+    void collectHierarchy()
+    {
+        LLVMModuleSet* modules = LLVMModuleSet::getLLVMModuleSet();
+        for (u32_t i = 0; i < modules->getModuleNum(); ++i)
+        {
+            llvm::DebugInfoFinder finder;
+            finder.processModule(*modules->getModule(i));
+            for (const llvm::DIType* type : finder.types())
+            {
+                const auto* composite = llvm::dyn_cast<llvm::DICompositeType>(type);
+                const std::string cls = debugClass(composite);
+                if (cls.empty())
+                    continue;
+                auto& bases = bases_[cls];
+                for (const llvm::DINode* element : composite->getElements())
+                {
+                    const auto* derived = llvm::dyn_cast<llvm::DIDerivedType>(element);
+                    if (derived == nullptr || derived->getTag() != llvm::dwarf::DW_TAG_inheritance)
+                        continue;
+                    const std::string base =
+                        debugClass(llvm::dyn_cast_or_null<llvm::DICompositeType>(derived->getBaseType()));
+                    if (!base.empty())
+                        bases.push_back(base);
+                }
+            }
+        }
+    }
+
+    bool derives(const std::string& cls, const std::string& base) const
+    {
+        if (cls == base)
+            return true;
+        auto it = bases_.find(cls);
+        if (it == bases_.end())
+            return false;
+        for (const std::string& direct : it->second)
+            if (derives(direct, base))
+                return true;
+        return false;
+    }
+
     /// "ns::X::X(int)" -> "ns::X"; empty if `function` is not a constructor.
     static std::string constructorClass(const std::string& function)
     {
@@ -514,6 +609,7 @@ private:
     void describeVirtualSites()
     {
         LLVMModuleSet* modules = LLVMModuleSet::getLLVMModuleSet();
+        collectHierarchy();
         for (const CallICFGNode* cs : pag_.getCallSiteSet())
         {
             if (!cs->isVirtualCall() || isIntrinsicName(cs->getCaller()->getName()))
@@ -525,10 +621,18 @@ private:
                 info.actuals.push_back(optionalNode(actual));
             info.actualRet = optionalNode(cs->getRetICFGNode()->getActualRet());
 
+            // [C-VCall]: only types t <: DeclTypeOf(r). The declared class is the class of the
+            // method named at the call (unknown hierarchy: no filter).
+            const std::string declared = declaredClass(cs);
+            if (declared.empty())
+                ++stats_.sitesWithoutDeclaredType;
             std::vector<const llvm::Function*> order;
             std::unordered_map<const llvm::Function*, std::vector<NodeId>> vtablesOf;
             for (const VTable& vtable : vtables())
             {
+                if (!declared.empty() && bases_.count(declared) != 0 &&
+                    !derives(vtableClass(vtable.global), declared))
+                    continue;
                 const llvm::Function* fn = vtableSlot(vtable.global, cs->getFunIdxInVtable());
                 if (fn == nullptr || fn->isDeclaration() || !relevant(vtable.object))
                     continue;
@@ -558,6 +662,7 @@ private:
     SVFIR& pag_;
     const CallGraph& callGraph_;
     std::vector<VTable> vtables_;
+    std::unordered_map<std::string, std::vector<std::string>> bases_; ///< class -> direct bases
     bool vtablesCollected_ = false;
     BuildStats& stats_;
     LDGraph graph_;

@@ -11,9 +11,12 @@
 //   -ldc-expect=<json>  check the queries in this file; exit 1 on failure
 //   -ldc-andersen       compare every variable's PTS with SVF Andersen (use with k = 0, lfc);
 //                       every function is analysed, as Andersen does; exit 1 on mismatch
+//   -ldc-eval           M5: run kcfa, ldc, lfc at depth -ldc-k and print a comparison table;
+//                       exit 1 if L_DC or L_FC miss an object that kCFA finds
 
 #include "ldc/Builder.h"
 #include "ldc/Check.h"
+#include "ldc/Eval.h"
 #include "ldc/LDGraph.h"
 #include "ldc/Solver.h"
 
@@ -39,6 +42,7 @@ const Option<std::string> Mode("ldc-mode", "Analysis: lfc | kcfa | ldc", "lfc");
 const Option<std::string> SourceFile("ldc-src", "C++ source file, for object labels", "");
 const Option<std::string> ExpectFile("ldc-expect", "Expected-results JSON to check", "");
 const Option<bool> CompareAndersen("ldc-andersen", "Compare PTS with SVF Andersen", false);
+const Option<bool> Evaluate("ldc-eval", "Compare kcfa, ldc, lfc and Andersen (M5)", false);
 
 } // namespace
 
@@ -81,6 +85,16 @@ int main(int argc, char** argv)
         return 2;
     }
     options.allFunctionsReachable = CompareAndersen();
+
+    if (Evaluate())
+    {
+        const std::size_t missing = ldc::evaluate(graph, *ander, options.k, std::cout);
+        std::cout << "Soundness vs kCFA: " << missing << " missing objects\n";
+        AndersenWaveDiff::releaseAndersenWaveDiff();
+        SVFIR::releaseSVFIR();
+        LLVMModuleSet::releaseLLVMModuleSet();
+        return missing == 0 ? 0 : 1;
+    }
 
     ldc::Solver solver(graph, options);
     solver.solve();

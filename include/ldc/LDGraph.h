@@ -57,6 +57,7 @@ enum class Label : std::uint8_t
     Store,
     Load,
     Dispatch,
+    Gep, ///< q = &p->f used as a value (C++ interior pointer): q points to ⟨O, off + f⟩
 };
 
 /// Label below the edge. ĉ = Enter, č = Exit (C_k alphabet). The boxed ⟦ĉ⟧ / ⟦č⟧ mark the

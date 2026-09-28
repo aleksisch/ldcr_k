@@ -67,13 +67,34 @@ public:
     std::size_t contextCount() const { return contexts_.size(); }
     /// Number of (function, context) pairs analysed.
     std::size_t methodContextCount() const;
+    /// Functions reached in at least one context.
+    std::size_t reachedFunctionCount() const;
+
+    /// Virtual call edges found: (call site, callee), and with the caller's context.
+    std::set<std::pair<CallSiteId, std::string>> virtualCallEdges() const;
+    std::size_t virtualCallEdgeContextCount() const { return virtualCalls_.size(); }
+    /// Receiver objects of unknown dynamic type that reached a virtual call (kcfa, ldc drop
+    /// them: a source of unsoundness to watch in the evaluation).
+    const std::set<NodeId>& untypedReceivers() const { return untypedReceivers_; }
 
 private:
     using Ctx = std::vector<CallSiteId>; ///< most recent call site first
     using CtxId = std::uint32_t;
-    using Obj = std::pair<NodeId, CtxId>;                 ///< object with heap context
+    /// Object with heap context, and an offset for interior pointers (&O.f, gep).
+    struct Obj
+    {
+        NodeId node;
+        CtxId ctx;
+        FieldId offset = 0;
+        bool operator<(const Obj& other) const
+        {
+            return std::tie(node, ctx, offset) < std::tie(other.node, other.ctx, other.offset);
+        }
+    };
     using Var = std::pair<NodeId, CtxId>;                 ///< node in a context
     using Field = std::tuple<NodeId, CtxId, FieldId>;     ///< field of a heap object
+    /// Field `field` of an object seen at `offset` (interior pointer).
+    static FieldId shift(FieldId offset, FieldId field);
     using ObjSet = std::set<Obj>;
 
     CtxId intern(const Ctx& ctx);
@@ -87,6 +108,7 @@ private:
 
     bool addAll(ObjSet& into, const ObjSet& from);
     ObjSet readField(const Obj& object, FieldId field) const;
+    ObjSet& fieldSet(const Obj& object, FieldId field);
 
     bool applyIntra(const Edge& edge, CtxId ctx);
     bool uses(Encoding encoding) const;
@@ -108,6 +130,10 @@ private:
     std::map<std::string, std::vector<EdgeId>> callsByCaller_;
     std::map<std::string, std::vector<CallSiteId>> virtualSitesByCaller_;
 
+    void recordCall(CallSiteId site, CtxId callerCtx, const std::string& callee);
+
+    std::set<std::tuple<CallSiteId, CtxId, std::string>> virtualCalls_;
+    std::set<NodeId> untypedReceivers_;
     std::size_t iterations_ = 0;
 };
 

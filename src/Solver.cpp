@@ -104,28 +104,43 @@ bool Solver::addAll(ObjSet& into, const ObjSet& from)
     return into.size() != before;
 }
 
+FieldId Solver::shift(FieldId offset, FieldId field)
+{
+    if (isSyntheticField(field))
+        return field;
+    if (offset == kAnyField || field == kAnyField)
+        return kAnyField;
+    return offset + field;
+}
+
+Solver::ObjSet& Solver::fieldSet(const Obj& object, FieldId field)
+{
+    return heap_[{object.node, object.ctx, shift(object.offset, field)}];
+}
+
 /// Field read with array-insensitive `*`: load[f] also sees store[*], and load[*]
 /// sees every real field of the object. Synthetic fields (p_i, ret) are separate from both.
-Solver::ObjSet Solver::readField(const Obj& object, FieldId field) const
+Solver::ObjSet Solver::readField(const Obj& object, FieldId requested) const
 {
+    const FieldId field = shift(object.offset, requested);
     ObjSet result;
     if (field == kAnyField)
     {
-        for (auto it = heap_.lower_bound({object.first, object.second, kAnyField});
-             it != heap_.end() && std::get<0>(it->first) == object.first &&
-             std::get<1>(it->first) == object.second;
+        for (auto it = heap_.lower_bound({object.node, object.ctx, kAnyField});
+             it != heap_.end() && std::get<0>(it->first) == object.node &&
+             std::get<1>(it->first) == object.ctx;
              ++it)
             result.insert(it->second.begin(), it->second.end());
         return result;
     }
     if (isSyntheticField(field))
     {
-        auto it = heap_.find({object.first, object.second, field});
+        auto it = heap_.find({object.node, object.ctx, field});
         return it != heap_.end() ? it->second : result;
     }
     for (FieldId f : {field, kAnyField})
     {
-        auto it = heap_.find({object.first, object.second, f});
+        auto it = heap_.find({object.node, object.ctx, f});
         if (it != heap_.end())
             result.insert(it->second.begin(), it->second.end());
     }
@@ -142,7 +157,7 @@ bool Solver::applyIntra(const Edge& edge, CtxId ctx)
     case Label::New:
     {
         const CtxId heapCtx = options_.k == 0 ? 0 : truncate(dst.second, options_.k - 1);
-        changed |= pts_[dst].insert({edge.src, heapCtx}).second;
+        changed |= pts_[dst].insert(Obj{edge.src, heapCtx}).second;
         break;
     }
     case Label::Assign:
@@ -150,11 +165,19 @@ bool Solver::applyIntra(const Edge& edge, CtxId ctx)
         break;
     case Label::Dispatch: // always a call edge (ĉ)
         break;
+    case Label::Gep: // interior pointer: same objects, offset moved by f
+    {
+        ObjSet shifted;
+        for (const Obj& object : pts_[src])
+            shifted.insert(Obj{object.node, object.ctx, shift(object.offset, edge.field)});
+        changed |= addAll(pts_[dst], shifted);
+        break;
+    }
     case Label::Store: // src --store[f]--> base
     {
         const ObjSet bases = pts_[dst];
         for (const Obj& object : bases)
-            changed |= addAll(heap_[{object.first, object.second, edge.field}], pts_[src]);
+            changed |= addAll(fieldSet(object, edge.field), pts_[src]);
         break;
     }
     case Label::Load: // base --load[f]--> dst
@@ -177,14 +200,20 @@ bool Solver::applyCall(const Edge& edge, CtxId callerCtx)
         const ObjSet receivers = pts_[{edge.src, nodeCtx(edge.src, callerCtx)}];
         for (const Obj& receiver : receivers)
         {
-            if (graph_.nodes()[receiver.first].type != edge.type)
+            const TypeId type = receiver.offset == 0 ? graph_.nodes()[receiver.node].type : kUnknownType;
+            if (type == kUnknownType)
+                untypedReceivers_.insert(receiver.node);
+            if (type != edge.type)
                 continue;
+            recordCall(edge.callSite, callerCtx, graph_.nodes()[edge.dst].function);
             changed |= reach(graph_.nodes()[edge.dst].function, calleeCtx);
             changed |= pts_[{edge.dst, calleeCtx}].insert(receiver).second;
         }
     }
     else if (edge.dir == CallDir::Enter) // actual (caller) → formal (callee)
     {
+        if (graph_.callSites()[static_cast<std::size_t>(edge.callSite)].isVirtual)
+            recordCall(edge.callSite, callerCtx, graph_.nodes()[edge.dst].function);
         changed |= reach(graph_.nodes()[edge.dst].function, calleeCtx);
         changed |= addAll(pts_[{edge.dst, nodeCtx(edge.dst, calleeCtx)}],
                           pts_[{edge.src, nodeCtx(edge.src, callerCtx)}]);
@@ -209,9 +238,12 @@ bool Solver::applyVirtualCall(CallSiteId siteId, CtxId callerCtx)
     for (const Obj& receiver : receivers)
     {
         // DynTypeOf(O): fixed at O's allocation (Builder::assignTypes).
-        const TypeId type = graph_.nodes()[receiver.first].type;
+        const TypeId type = receiver.offset == 0 ? graph_.nodes()[receiver.node].type : kUnknownType;
         if (type == kUnknownType)
+        {
+            untypedReceivers_.insert(receiver.node);
             continue;
+        }
 
         for (const VirtualTarget& target : site.targets)
         {
@@ -220,6 +252,7 @@ bool Solver::applyVirtualCall(CallSiteId siteId, CtxId callerCtx)
             if (!dispatches || target.formals.empty())
                 continue;
             const std::string& callee = graph_.nodes()[target.formals[0]].function;
+            recordCall(siteId, callerCtx, callee);
             changed |= reach(callee, calleeCtx);
             // [I-VCall]: the receiver object goes to `this` of its own target only ...
             changed |= pts_[{target.formals[0], calleeCtx}].insert(receiver).second;
@@ -274,8 +307,29 @@ std::set<NodeId> Solver::pts(NodeId n) const
     std::set<NodeId> result;
     for (auto it = pts_.lower_bound({n, 0}); it != pts_.end() && it->first.first == n; ++it)
         for (const Obj& object : it->second)
-            result.insert(object.first);
+            result.insert(object.node);
     return result;
+}
+
+void Solver::recordCall(CallSiteId site, CtxId callerCtx, const std::string& callee)
+{
+    virtualCalls_.insert({site, callerCtx, callee});
+}
+
+std::set<std::pair<CallSiteId, std::string>> Solver::virtualCallEdges() const
+{
+    std::set<std::pair<CallSiteId, std::string>> edges;
+    for (const auto& [site, ctx, callee] : virtualCalls_)
+        edges.insert({site, callee});
+    return edges;
+}
+
+std::size_t Solver::reachedFunctionCount() const
+{
+    std::size_t count = 0;
+    for (const auto& [function, contexts] : methodCtx_)
+        count += !function.empty() && !contexts.empty();
+    return count;
 }
 
 std::size_t Solver::methodContextCount() const

@@ -1,25 +1,11 @@
-# Compile every tests/cpp/*.cpp to LLVM IR (clang++ from the SVF image, then mem2reg)
-# and register a CTest that runs `ldc` on it.
-
-get_filename_component(_llvm_bin "${LLVM_DIR}/../../../bin" ABSOLUTE)
-find_program(LDC_CLANGXX clang++ HINTS "${_llvm_bin}" REQUIRED)
-find_program(LDC_OPT opt HINTS "${_llvm_bin}" REQUIRED)
+# Compile every tests/cpp/*.cpp to LLVM IR and register CTests that run `ldc` on it.
 
 file(GLOB LDC_TEST_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/cpp/*.cpp")
 
 set(LDC_TEST_IR "")
 foreach(src IN LISTS LDC_TEST_SOURCES)
   get_filename_component(name "${src}" NAME_WE)
-  set(raw "${CMAKE_CURRENT_BINARY_DIR}/${name}.raw.ll")
-  set(ll  "${CMAKE_CURRENT_BINARY_DIR}/${name}.ll")
-  add_custom_command(
-    OUTPUT "${ll}"
-    COMMAND "${LDC_CLANGXX}" -S -g -fno-discard-value-names
-            -Xclang -disable-O0-optnone -emit-llvm "${src}" -o "${raw}"
-    COMMAND "${LDC_OPT}" -S -p=mem2reg "${raw}" -o "${ll}"
-    DEPENDS "${src}"
-    COMMENT "IR: ${name}"
-    VERBATIM)
+  ldc_compile_ir("${src}" ll)
   list(APPEND LDC_TEST_IR "${ll}")
   set(expect "${CMAKE_CURRENT_SOURCE_DIR}/expected/${name}.json")
   # M2: L_FC at k = 0 must equal SVF Andersen on every variable.
