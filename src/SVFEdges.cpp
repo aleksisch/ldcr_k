@@ -5,6 +5,9 @@
 #include "SVFIR/SVFStatements.h"
 #include "SVFIR/SVFVariables.h"
 #include "SVF-LLVM/LLVMModule.h"
+#include <unordered_set>
+#include <unordered_map>
+#include <utility>
 
 using namespace SVF;
 namespace ldc::frontend::detail {
@@ -27,18 +30,83 @@ bool relevant(const SVFVar* var) {
     return true;
 }
 
-// Preserve each GEP and the original memory-access endpoints.
-StatementEdges statementEdges(SVFIR& pag) {
-    StatementEdges result;
-    auto& edges = result.edges;
+// Fold `q = gep p, f; *q = v` into `v --store[f]--> p`. Loads
+// and stores through a gep result are folded onto the gep's base (a plain `*p` is field 0).
+
+namespace {
+struct Geps {
+    std::unordered_map<SvfId, std::pair<const SVFVar*, FieldOffset>> def; ///< result -> (base, f)
+    std::size_t variant = 0; ///< geps with a variable struct field (field `*`)
+};
+
+Geps collectGeps(SVFIR& pag) {
+    Geps geps;
     for (const auto* stmt : pag.getSVFStmtSet(SVFStmt::Gep)) {
         const auto* gep = SVFUtil::cast<GepStmt>(stmt);
-        auto field = kAnyField;
-        if (gep->isVariantFieldGep())
-            ++result.variantGeps;
-        else
+        // As SVF: array indices are ignored; only arithmetic over struct fields loses the field.
+        FieldOffset field = kAnyField;
+        if (!gep->isVariantFieldGep())
             field = FieldOffset{static_cast<std::int32_t>(gep->getConstantStructFldIdx())};
-        edges.push_back({gep->getRHSVar(), gep->getLHSVar(), Label::Gep, field});
+        else
+            ++geps.variant;
+        geps.def[SvfId{gep->getLHSVarID()}] = {gep->getRHSVar(), field};
+    }
+    return geps;
+}
+
+/// Resolves an address to (base pointer, field), following chains of geps.
+std::pair<const SVFVar*, FieldOffset> resolveAddress(const Geps& geps, const SVFVar* ptr) {
+    FieldOffset field{0};
+    const SVFVar* base = ptr;
+    std::unordered_set<SvfId> visited;
+    for (auto it = geps.def.find(SvfId{base->getId()}); it != geps.def.end();
+         it = geps.def.find(SvfId{base->getId()})) {
+        if (!visited.insert(SvfId{base->getId()}).second) return {base, kAnyField};
+        const FieldOffset step = it->second.second;
+        field = (field == kAnyField || step == kAnyField) ? kAnyField
+                                                          : FieldOffset{field.value + step.value};
+        base = it->second.first;
+    }
+    return {base, field};
+}
+
+/// Gep results used as a value: stored, copied, passed, returned, merged by phi/select.
+std::unordered_set<SvfId> findEscapingGeps(SVFIR& pag, const Geps& geps) {
+    std::unordered_set<SvfId> escaping;
+    auto check = [&](const SVFVar* var) {
+        if (var != nullptr && geps.def.count(SvfId{var->getId()}) != 0)
+            escaping.insert(SvfId{var->getId()});
+    };
+    // Copied, stored (the value, not the address) or returned.
+    for (auto kind : {SVFStmt::Copy, SVFStmt::Store, SVFStmt::Ret}) {
+        for (const auto* stmt : pag.getSVFStmtSet(kind)) {
+            check(SVFUtil::cast<AssignStmt>(stmt)->getRHSVar());
+        }
+    }
+    // Passed to a direct call or merged by phi/select.
+    for (auto kind : {SVFStmt::Call, SVFStmt::Phi, SVFStmt::Select}) {
+        for (const auto* stmt : pag.getSVFStmtSet(kind)) {
+            for (const auto* op : SVFUtil::cast<MultiOpndStmt>(stmt)->getOpndVars()) check(op);
+        }
+    }
+    // Indirect calls do not necessarily have CallPE statements in SVFIR.
+    for (const auto* site : pag.getCallSiteSet()) {
+        for (const auto* actual : site->getActualParms()) check(actual);
+    }
+    // Returned, also from functions without callers.
+    for (const auto& [_, ret] : pag.getFunRets()) check(ret);
+    return escaping;
+}
+
+/// The edges of SVFIR's statements. An escaping gep (the vptr `&vtable[2]` stored by
+/// constructors, `&obj->member` passed as `this`, ...) becomes `base --gep[f]--> q`: q points to
+/// the field objects ⟨O, off + f⟩, like SVF's GepObjVar.
+SvfEdges statementEdges(SVFIR& pag, const Geps& geps, const std::unordered_set<SvfId>& escaping) {
+    SvfEdges edges;
+    for (auto id : escaping) {
+        const SVFVar* gep = pag.getGNode(id.value);
+        const auto [base, field] = resolveAddress(geps, gep);
+        edges.push_back({base, gep, Label::Gep, field});
     }
     auto stmts = [&](SVFStmt::PEDGEK kind) { return pag.getSVFStmtSet(kind); };
     for (const auto* s : stmts(SVFStmt::Addr))
@@ -49,10 +117,14 @@ StatementEdges statementEdges(SVFIR& pag) {
         for (const auto* s : stmts(kind))
             for (const auto* op : SVFUtil::cast<MultiOpndStmt>(s)->getOpndVars())
                 edges.push_back({op, s->getDstNode(), Label::Assign});
-    for (const auto* s : stmts(SVFStmt::Store))
-        edges.push_back({s->getSrcNode(), s->getDstNode(), Label::Store, FieldOffset{0}});
-    for (const auto* s : stmts(SVFStmt::Load))
-        edges.push_back({s->getSrcNode(), s->getDstNode(), Label::Load, FieldOffset{0}});
+    for (const auto* s : stmts(SVFStmt::Store)) { // *p = v  →  v --store[f]--> base(p)
+        auto [base, field] = resolveAddress(geps, s->getDstNode());
+        edges.push_back({s->getSrcNode(), base, Label::Store, field});
+    }
+    for (const auto* s : stmts(SVFStmt::Load)) { // x = *p  →  base(p) --load[f]--> x
+        auto [base, field] = resolveAddress(geps, s->getSrcNode());
+        edges.push_back({base, s->getDstNode(), Label::Load, field});
+    }
     for (const auto* s : stmts(SVFStmt::Call)) { // formal ← one actual per call site
         const auto* call = SVFUtil::cast<CallPE>(s);
         for (auto i = 0u; i < call->getOpVarNum(); ++i)
@@ -64,8 +136,10 @@ StatementEdges statementEdges(SVFIR& pag) {
         edges.push_back({ret->getRHSVar(), ret->getLHSVar(), Label::Assign, std::nullopt,
                          ret->getCallInst(), CallDir::Exit});
     }
-    return result;
+    return edges;
 }
+
+} // namespace
 
 // Resolve argument/return flow of indirect calls using Andersen's call graph.
 SvfEdges indirectCalls(SVFIR& pag, const CallGraph& callGraph) {
@@ -91,6 +165,11 @@ SvfEdges indirectCalls(SVFIR& pag, const CallGraph& callGraph) {
         }
     }
     return edges;
+}
+
+StatementEdges statementEdges(SVFIR& pag) {
+    const Geps geps = collectGeps(pag);
+    return {statementEdges(pag, geps, findEscapingGeps(pag, geps)), geps.variant};
 }
 
 } // namespace ldc::frontend::detail
