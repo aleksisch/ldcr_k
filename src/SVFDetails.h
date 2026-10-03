@@ -19,7 +19,7 @@ struct SvfEdge {
     const SVF::SVFVar* src;
     const SVF::SVFVar* dst;
     Label label;
-    std::optional<FieldId> field;
+    std::optional<FieldOffset> field;
     const SVF::CallICFGNode* site = nullptr;
     CallDir dir = CallDir::None;
 };

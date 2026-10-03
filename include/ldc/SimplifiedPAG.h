@@ -9,12 +9,40 @@
 
 namespace ldc::frontend {
 
-using NodeId = std::uint32_t;
-using SvfId = std::uint32_t;
-using FieldId = std::int32_t;
-using CallSiteId = std::int32_t;
+struct NodeId {
+    std::uint32_t value{};
+    friend bool operator==(NodeId lhs, NodeId rhs);
+    friend bool operator!=(NodeId lhs, NodeId rhs);
+};
+
+struct SvfId {
+    std::uint32_t value{};
+    friend bool operator==(SvfId lhs, SvfId rhs);
+    friend bool operator!=(SvfId lhs, SvfId rhs);
+};
+
+struct FieldOffset {
+    std::int32_t value{};
+    friend bool operator==(FieldOffset lhs, FieldOffset rhs);
+    friend bool operator!=(FieldOffset lhs, FieldOffset rhs);
+};
+
+struct CallSiteId {
+    std::int32_t value{};
+    friend bool operator==(CallSiteId lhs, CallSiteId rhs);
+    friend bool operator!=(CallSiteId lhs, CallSiteId rhs);
+};
+
+} // namespace ldc::frontend
+
+template <> struct std::hash<ldc::frontend::SvfId> {
+    std::size_t operator()(ldc::frontend::SvfId id) const noexcept;
+};
+
+namespace ldc::frontend {
+
 // Unknown field offset; an empty optional means the edge has no field.
-inline constexpr FieldId kAnyField = -2;
+inline constexpr FieldOffset kAnyField{-2};
 
 enum class NodeKind { Var, Obj };
 enum class Label { New, Assign, Store, Load, Gep };
@@ -34,7 +62,7 @@ struct Edge {
     NodeId src;
     NodeId dst;
     Label label;
-    std::optional<FieldId> field; // flattened struct offset; arrays follow SVF's abstraction
+    std::optional<FieldOffset> field; // flattened struct offset; arrays follow SVF's abstraction
     std::optional<CallSiteId> callSite;
     CallDir dir = CallDir::None;
 };
@@ -45,13 +73,17 @@ struct CallTarget {
     std::optional<NodeId> ret;
 };
 
+struct CallFlags {
+    std::uint32_t isIndirect : 1;
+    std::uint32_t isVirtual : 1;
+};
+
 struct CallSite {
     std::optional<SvfId> svfId; // call ICFG node, not a PAG node
     std::string caller;
     std::string sourceLocation;
     int line = 0;
-    bool isIndirect = false;
-    bool isVirtual = false;
+    CallFlags flags{};
     // Null entries preserve argument positions for values excluded from the graph.
     std::vector<std::optional<NodeId>> actuals;
     std::optional<NodeId> actualRet;

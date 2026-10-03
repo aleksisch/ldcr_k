@@ -32,7 +32,7 @@ std::unordered_map<SvfId, DebugName> debugNames() {
     auto record = [&](const llvm::Value* value, const std::string& function,
                       const std::string& name) {
         if (value && modules->hasValueNode(value))
-            names.emplace(modules->getValueNode(value), DebugName{function, name});
+            names.emplace(SvfId{modules->getValueNode(value)}, DebugName{function, name});
     };
     for (u32_t i = 0; i < modules->getModuleNum(); ++i)
         for (const llvm::Function& fn : *modules->getModule(i)) {
@@ -85,13 +85,14 @@ public:
 
 private:
     NodeId node(const SVFVar* value) {
-        if (auto id = graph_.findSvf(value->getId())) return *id;
+        if (auto id = graph_.findSvf(SvfId{value->getId()})) return *id;
         Node info;
-        info.svfId = value->getId();
+        info.svfId = SvfId{value->getId()};
         info.kind = SVFUtil::isa<ObjVar>(value) ? NodeKind::Obj : NodeKind::Var;
         info.name = value->getName();
         if (info.name.empty())
-            info.name = (info.kind == NodeKind::Obj ? "o" : "v") + std::to_string(*info.svfId);
+            info.name =
+                (info.kind == NodeKind::Obj ? "o" : "v") + std::to_string(info.svfId->value);
         if (const auto* function = value->getFunction())
             info.function = llvm::demangle(function->getName());
         if (auto it = names_.find(*info.svfId); it != names_.end())
@@ -108,12 +109,12 @@ private:
     CallSiteId callSite(const CallICFGNode* site) {
         if (auto it = sites_.find(site); it != sites_.end()) return it->second;
         CallSite info;
-        info.svfId = site->getId();
+        info.svfId = SvfId{site->getId()};
         info.caller = llvm::demangle(site->getCaller()->getName());
         info.sourceLocation = site->getSourceLoc();
         info.line = sourceLine(info.sourceLocation);
-        info.isIndirect = pag_.isIndirectCallSites(site);
-        info.isVirtual = site->isVirtualCall();
+        info.flags.isIndirect = pag_.isIndirectCallSites(site);
+        info.flags.isVirtual = site->isVirtualCall();
         for (const auto* actual : site->getActualParms())
             info.actuals.push_back(optionalNode(actual));
         info.actualRet = optionalNode(site->getRetICFGNode()->getActualRet());

@@ -151,6 +151,11 @@ The public headers are `SimplifiedPAG.h` (owned graph records and operations) an
 `SVFFrontend.h` (module analysis, graph extraction, and result statistics). Statement/call extraction
 and debug-name helpers are private implementation details in `src/`.
 
+Node, SVF, and call-site IDs are distinct structs with a `value` member;
+integer conversion and vector indexing are explicit. `FieldOffset` is a separate
+signed offset type. Call-site properties are packed bit-fields accessed through
+`site.flags.isIndirect` and `site.flags.isVirtual`, both initially false.
+
 Missing SVF IDs, edge fields, and call-site IDs use `std::optional`, rather than
 reserved integer values. The one field constant, `kAnyField`, represents an
 unknown offset; it differs from an absent field and from offset zero.

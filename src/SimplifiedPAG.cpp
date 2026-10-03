@@ -2,7 +2,27 @@
 #include <array>
 #include <ostream>
 
+std::size_t std::hash<ldc::frontend::SvfId>::operator()(ldc::frontend::SvfId id) const noexcept {
+    return std::hash<std::uint32_t>{}(id.value);
+}
+
 namespace ldc::frontend {
+bool operator==(NodeId lhs, NodeId rhs) { return lhs.value == rhs.value; }
+
+bool operator!=(NodeId lhs, NodeId rhs) { return !(lhs == rhs); }
+
+bool operator==(SvfId lhs, SvfId rhs) { return lhs.value == rhs.value; }
+
+bool operator!=(SvfId lhs, SvfId rhs) { return !(lhs == rhs); }
+
+bool operator==(FieldOffset lhs, FieldOffset rhs) { return lhs.value == rhs.value; }
+
+bool operator!=(FieldOffset lhs, FieldOffset rhs) { return !(lhs == rhs); }
+
+bool operator==(CallSiteId lhs, CallSiteId rhs) { return lhs.value == rhs.value; }
+
+bool operator!=(CallSiteId lhs, CallSiteId rhs) { return !(lhs == rhs); }
+
 namespace {
 const char* const labels[] = {"new", "assign", "store", "load", "gep"};
 std::string escapeDot(const std::string& text) {
@@ -25,7 +45,7 @@ std::string escapeDot(const std::string& text) {
 NodeId SimplifiedPAG::addNode(const Node& node) {
     if (node.svfId)
         if (auto id = findSvf(*node.svfId)) return *id;
-    const NodeId id = static_cast<NodeId>(nodes_.size());
+    const NodeId id = NodeId{static_cast<std::uint32_t>(nodes_.size())};
     nodes_.push_back(node);
     if (node.svfId) bySvf_.emplace(*node.svfId, id);
     return id;
@@ -38,7 +58,7 @@ std::optional<NodeId> SimplifiedPAG::findSvf(SvfId id) const {
 
 CallSiteId SimplifiedPAG::addCallSite(const CallSite& site) {
     sites_.push_back(site);
-    return static_cast<CallSiteId>(sites_.size() - 1);
+    return CallSiteId{static_cast<std::int32_t>(sites_.size() - 1)};
 }
 
 void SimplifiedPAG::addEdge(const Edge& edge) { edges_.push_back(edge); }
@@ -60,14 +80,14 @@ void SimplifiedPAG::printSummary(std::ostream& out) const {
 
 void SimplifiedPAG::dumpDot(std::ostream& out) const {
     out << "digraph SimplifiedPAG {\n  rankdir=LR;\n";
-    for (NodeId id = 0; id < nodes_.size(); ++id) {
+    for (std::size_t id = 0; id < nodes_.size(); ++id) {
         const Node& node = nodes_[id];
         std::string text = node.function.empty() ? "" : node.function + "::";
         text += node.sourceName.empty() ? node.name : node.sourceName;
         if (node.line) text += " @" + std::to_string(node.line);
         out << "  n" << id << " [shape=" << (node.kind == NodeKind::Obj ? "box" : "ellipse")
             << ", label=\"" << escapeDot(text) << "\"";
-        if (node.svfId) out << ", svf_id=\"" << *node.svfId << "\"";
+        if (node.svfId) out << ", svf_id=\"" << node.svfId->value << "\"";
         out << ", source=\"" << escapeDot(node.sourceLocation) << "\"];\n";
     }
     for (const Edge& edge : edges_) {
@@ -75,12 +95,12 @@ void SimplifiedPAG::dumpDot(std::ostream& out) const {
         if (edge.field == kAnyField)
             text += "[*]";
         else if (edge.field)
-            text += "[" + std::to_string(*edge.field) + "]";
+            text += "[" + std::to_string(edge.field->value) + "]";
         if (edge.dir != CallDir::None && edge.callSite)
             text += (edge.dir == CallDir::Enter ? " enter@" : " exit@") +
-                    std::to_string(*edge.callSite);
-        out << "  n" << edge.src << " -> n" << edge.dst << " [label=\"" << escapeDot(text)
-            << "\"];\n";
+                    std::to_string(edge.callSite->value);
+        out << "  n" << edge.src.value << " -> n" << edge.dst.value << " [label=\""
+            << escapeDot(text) << "\"];\n";
     }
     for (std::size_t id = 0; id < sites_.size(); ++id) {
         const auto& site = sites_[id];
