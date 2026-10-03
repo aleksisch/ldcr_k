@@ -9,7 +9,7 @@ The reusable `ldc_frontend` library also builds an owning `ProgramGraph` with
 variable/object nodes, SVF ID lookup, pointer-flow edges, call-site metadata,
 and source/debug names. Its headers live in `include/ldc/`.
 
-## Native setup (Ubuntu 24.04, Bash)
+## Native setup (Ubuntu 24.04 x86-64, Bash)
 
 ### 1. Install build prerequisites
 
@@ -19,52 +19,38 @@ sudo apt install build-essential cmake ninja-build git curl wget unzip xz-utils 
   libncurses-dev zlib1g-dev libzstd-dev libffi-dev libxml2-dev
 ```
 
-CMake 3.23 or newer is needed to build the pinned SVF revision. Keep the same
-LLVM installation for building SVF, linking this driver, and producing input IR.
+Keep the same LLVM installation for linking this driver and producing input IR.
+The packages below include SVF's headers, libraries, CMake files, and LLVM tools.
 
-### 2. Build SVF and its dependencies
+### 2. Install prebuilt dependencies
 
-Use a separate directory for dependencies. These commands pin SVF so that its
-C++ API cannot change underneath the project:
+From this repository checkout:
 
 ```sh
 export LDCR_DEPS="$HOME/.local/share/ldcr-deps"
-mkdir -p "$LDCR_DEPS"
-git clone https://github.com/SVF-tools/SVF.git "$LDCR_DEPS/SVF"
-git -C "$LDCR_DEPS/SVF" checkout f78454fb8d71b0d16c80a6f009b8a1d1c20c75e5
-
-(
-  cd "$LDCR_DEPS/SVF"
-  unset LLVM_DIR Z3_DIR
-  SVF_BUILD_JOBS=2 bash ./build.sh
-)
-
-# The pinned SVF build exports this include path without creating it.
-mkdir -p "$LDCR_DEPS/SVF/Release-build/include/SVF"
+bash scripts/setup-deps.sh "$LDCR_DEPS"
 ```
 
-SVF's [build script](https://github.com/SVF-tools/SVF/blob/f78454fb8d71b0d16c80a6f009b8a1d1c20c75e5/build.sh)
-downloads LLVM/Clang 21.1.0 and Z3 4.15.4, then builds SVF locally. It needs
-network access and several GB of free disk space. Adjust `SVF_BUILD_JOBS` for
-your available memory. Re-running `build.sh` recreates SVF's `Release-build`.
+The script downloads and verifies pinned SHA-256 checksums for the official
+[SVF Ubuntu package and LLVM 21.1.0](https://github.com/SVF-tools/SVF/releases/tag/SVF-3.3)
+and [Z3 4.15.4](https://github.com/Z3Prover/z3/releases/tag/z3-4.15.4).
+It unpacks them locally; no dependency compilation or Docker is needed. Allow
+several GB of free disk space. The packages target Ubuntu 24.04 x86-64 (Z3 needs
+glibc 2.39 or newer). The SVF release is tagged `SVF-3.3`, while its packaged
+CMake metadata reports version 3.4; use the exact matching archives in the script.
 
 ### 3. Configure your shell
 
-Run this in each new shell before configuring or using the driver (or save it
-in a shell file and source it):
+Run this in each new Bash shell before configuring or using the driver:
 
 ```sh
 export LDCR_DEPS="$HOME/.local/share/ldcr-deps"
-export SVF_DIR="$LDCR_DEPS/SVF/Release-build/lib/cmake/SVF"
-export LLVM_DIR="$LDCR_DEPS/SVF/llvm-21.1.0.obj/lib/cmake/llvm"
-export Z3_DIR="$LDCR_DEPS/SVF/z3.obj"
-export PATH="$LDCR_DEPS/SVF/llvm-21.1.0.obj/bin:$PATH"
-export LD_LIBRARY_PATH="$LDCR_DEPS/SVF/Release-build/lib:$LDCR_DEPS/SVF/Release-build/svf:$LDCR_DEPS/SVF/Release-build/svf-llvm:$LDCR_DEPS/SVF/llvm-21.1.0.obj/lib:$Z3_DIR/bin${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+source "$LDCR_DEPS/env.sh"
 ```
 
-Here `SVF_DIR` and `LLVM_DIR` are directories containing `SVFConfig.cmake` and
-`LLVMConfig.cmake`; `Z3_DIR` is the Z3 installation root. SVF's own `setup.sh`
-uses different directory conventions, so use the values above for this project.
+The generated environment sets `SVF_DIR` and `LLVM_DIR` to their CMake package
+directories, `Z3_DIR` to the Z3 installation root, and the compiler/runtime
+library paths. Use the same dependency directory you passed to the installer.
 
 ### 4. Build and test this repository
 
@@ -85,8 +71,8 @@ You can also run CTest directly with `ctest --test-dir build-native --output-on-
 
 [GitHub Actions](.github/workflows/ci.yml) runs the same native build and `test`
 target on pull requests and pushes to `master`, and supports manual runs.
-It uses Ubuntu 24.04 and the pinned SVF/LLVM/Z3 bootstrap above, caching the
-native toolchain between runs. The first run builds SVF from source.
+It uses Ubuntu 24.04 and the pinned prebuilt SVF/LLVM/Z3 packages above, caching
+the native toolchain between runs. Even the first run uses binary dependencies.
 
 The tests check direct and resolved function-pointer calls, nested field offsets,
 argument/return flow, source/debug information, IR without debug information,
@@ -173,11 +159,11 @@ modeling and LDCR dispatch labels are left to the follow-up analysis.
 
 - You can reuse an existing SVF build: point `SVF_DIR` at its CMake package,
   `LLVM_DIR` at the LLVM package used to build it, and `Z3_DIR` at its Z3
-  installation. Native validation also passes with the pinned SVF revision and
-  LLVM/Clang 22 on Ubuntu 24.04.
+  installation. The frontend also supports the previously tested SVF source
+  revision `f78454fb8d71b0d16c80a6f009b8a1d1c20c75e5` with LLVM/Clang 22.
 - If CMake reports a missing `include/SVF` directory in SVF's build tree, create
-  that empty directory as shown in step 2; the actual headers come from SVF's
-  source tree and generated include directory.
+  that empty directory; the actual headers come from SVF's source tree and
+  generated include directory. The prebuilt setup does not need this workaround.
 - If clang++ or opt is missing, install both for the selected LLVM version.
   For a custom layout, pass `-DLDC_CLANGXX=/absolute/path/to/clang++` and
   `-DLDC_OPT=/absolute/path/to/opt` when configuring. Do not mix LLVM versions.
