@@ -124,7 +124,13 @@ targets. This does not perform a new points-to analysis or infer missing targets
 
 ### Use the library
 
-Link a CMake target against `ldc_frontend`, then use the API while SVF is alive:
+Link a CMake target against `ldc_frontend`. For a complete run from LLVM IR,
+`analyzeModules({"input.ll"})` loads the modules, runs Andersen, and returns an
+owned `FrontendResult` containing the simplified PAG, call edges, and statistics.
+SVF/LLVM are released before it returns. Parse SVF options before calling it;
+it uses process-global state and cannot overlap another SVF session.
+
+If you already manage SVF yourself, build the simplified PAG while SVF is alive:
 
 ```cpp
 #include "ldc/SVFFrontend.h"
@@ -142,7 +148,7 @@ distinct. `findSvf` maps SVF IDs back to graph node IDs. Read the graph through
 counts with `printSummary()`.
 
 The public headers are `SimplifiedPAG.h` (owned graph records and operations) and
-`SVFFrontend.h` (`buildSimplifiedPAG` and `BuildStats`). Statement/call extraction
+`SVFFrontend.h` (module analysis, graph extraction, and result statistics). Statement/call extraction
 and debug-name helpers are private implementation details in `src/`.
 
 Missing SVF IDs, edge fields, and call-site IDs use `std::optional`, rather than
