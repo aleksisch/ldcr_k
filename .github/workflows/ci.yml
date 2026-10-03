@@ -20,10 +20,12 @@ jobs:
     timeout-minutes: 45
     env:
       SVF_COMMIT: f78454fb8d71b0d16c80a6f009b8a1d1c20c75e5
-      LDCR_DEPS: ${{ runner.temp }}/ldcr-deps
       CTEST_OUTPUT_ON_FAILURE: '1'
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Set dependency directory
+        run: echo "LDCR_DEPS=$RUNNER_TEMP/ldcr-deps" >> "$GITHUB_ENV"
 
       - name: Install build prerequisites
         run: |
