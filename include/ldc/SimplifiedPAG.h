@@ -9,29 +9,20 @@
 
 namespace ldc::frontend {
 
-struct NodeId {
-    std::uint32_t value{};
-    friend bool operator==(NodeId lhs, NodeId rhs);
-    friend bool operator!=(NodeId lhs, NodeId rhs);
+template <typename Tag, typename Value> struct StrongId {
+    Value value{};
+
+    friend constexpr bool operator==(StrongId lhs, StrongId rhs) noexcept {
+        return lhs.value == rhs.value;
+    }
+
+    friend constexpr bool operator!=(StrongId lhs, StrongId rhs) noexcept { return !(lhs == rhs); }
 };
 
-struct SvfId {
-    std::uint32_t value{};
-    friend bool operator==(SvfId lhs, SvfId rhs);
-    friend bool operator!=(SvfId lhs, SvfId rhs);
-};
-
-struct FieldOffset {
-    std::int32_t value{};
-    friend bool operator==(FieldOffset lhs, FieldOffset rhs);
-    friend bool operator!=(FieldOffset lhs, FieldOffset rhs);
-};
-
-struct CallSiteId {
-    std::int32_t value{};
-    friend bool operator==(CallSiteId lhs, CallSiteId rhs);
-    friend bool operator!=(CallSiteId lhs, CallSiteId rhs);
-};
+using NodeId = StrongId<struct NodeIdTag, std::uint32_t>;
+using SvfId = StrongId<struct SvfIdTag, std::uint32_t>;
+using FieldOffset = StrongId<struct FieldOffsetTag, std::int32_t>;
+using CallSiteId = StrongId<struct CallSiteIdTag, std::int32_t>;
 
 } // namespace ldc::frontend
 

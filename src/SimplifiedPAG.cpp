@@ -7,22 +7,6 @@ std::size_t std::hash<ldc::frontend::SvfId>::operator()(ldc::frontend::SvfId id)
 }
 
 namespace ldc::frontend {
-bool operator==(NodeId lhs, NodeId rhs) { return lhs.value == rhs.value; }
-
-bool operator!=(NodeId lhs, NodeId rhs) { return !(lhs == rhs); }
-
-bool operator==(SvfId lhs, SvfId rhs) { return lhs.value == rhs.value; }
-
-bool operator!=(SvfId lhs, SvfId rhs) { return !(lhs == rhs); }
-
-bool operator==(FieldOffset lhs, FieldOffset rhs) { return lhs.value == rhs.value; }
-
-bool operator!=(FieldOffset lhs, FieldOffset rhs) { return !(lhs == rhs); }
-
-bool operator==(CallSiteId lhs, CallSiteId rhs) { return lhs.value == rhs.value; }
-
-bool operator!=(CallSiteId lhs, CallSiteId rhs) { return !(lhs == rhs); }
-
 namespace {
 const char* const labels[] = {"new", "assign", "store", "load", "gep"};
 std::string escapeDot(const std::string& text) {
