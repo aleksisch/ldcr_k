@@ -61,7 +61,7 @@ public:
                 for (const auto* site : edge->getIndirectCalls()) targets_[site].insert(callee);
             }
     }
-    ProgramGraph run() {
+    SimplifiedPAG run() {
         const auto statements = statementEdges(pag_);
         stats_.variantGeps = statements.variantGeps;
         add(statements.edges);
@@ -144,13 +144,13 @@ private:
     const CallGraph& calls_;
     std::unordered_map<const CallICFGNode*, std::set<const FunObjVar*>> targets_;
     BuildStats& stats_;
-    ProgramGraph graph_;
+    SimplifiedPAG graph_;
     std::unordered_map<SvfId, DebugName> names_;
     std::unordered_map<const CallICFGNode*, CallSiteId> sites_;
 };
 } // namespace
 
-ProgramGraph buildProgramGraph(SVFIR& pag, const CallGraph& calls, BuildStats& stats) {
+SimplifiedPAG buildSimplifiedPAG(SVFIR& pag, const CallGraph& calls, BuildStats& stats) {
     stats = {};
     return Builder(pag, calls, stats).run();
 }

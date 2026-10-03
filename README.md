@@ -5,8 +5,9 @@ and prints sorted, unique call-graph edges as `call: <caller> -> <callee>`.
 Function names use LLVM linkage names. The graph includes direct calls and
 indirect/virtual targets resolved by Andersen; its precision is SVF's.
 
-The reusable `ldc_frontend` library also builds an owning `ProgramGraph` with
-variable/object nodes, SVF ID lookup, pointer-flow edges, call-site metadata,
+The reusable `ldc_frontend` library also builds an owning simplified pointer
+assignment graph (`SimplifiedPAG`) with variable/object nodes, SVF ID lookup,
+pointer-flow edges, call-site metadata,
 and source/debug names. Its headers live in `include/ldc/`.
 
 ## Native setup (Ubuntu 24.04 x86-64, Bash)
@@ -129,19 +130,19 @@ Link a CMake target against `ldc_frontend`, then use the API while SVF is alive:
 #include "ldc/SVFFrontend.h"
 
 ldc::frontend::BuildStats stats;
-auto graph = ldc::frontend::buildProgramGraph(*pag, *andersen->getCallGraph(), stats);
+auto graph = ldc::frontend::buildSimplifiedPAG(*pag, *andersen->getCallGraph(), stats);
 graph.dumpDot(output);
 ```
 
-`ProgramGraph` owns its nodes, edges, and metadata, so it remains usable after
+`SimplifiedPAG` owns its nodes, edges, and metadata, so it remains usable after
 SVF/LLVM cleanup. You can construct one directly with `addNode`, `addEdge`, and
 `addCallSite`; nodes with an SVF ID are interned, while nodes without one stay
 distinct. `findSvf` maps SVF IDs back to graph node IDs. Read the graph through
 `nodes()`, `edges()`, and `callSites()`; export it with `dumpDot()` or inspect
 counts with `printSummary()`.
 
-The public headers are `ProgramGraph.h` (owned graph records and operations) and
-`SVFFrontend.h` (`buildProgramGraph` and `BuildStats`). Statement/call extraction
+The public headers are `SimplifiedPAG.h` (owned graph records and operations) and
+`SVFFrontend.h` (`buildSimplifiedPAG` and `BuildStats`). Statement/call extraction
 and debug-name helpers are private implementation details in `src/`.
 
 Missing SVF IDs, edge fields, and call-site IDs use `std::optional`, rather than

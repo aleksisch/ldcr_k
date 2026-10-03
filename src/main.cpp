@@ -47,7 +47,7 @@ int main(int argc, char** argv) {
     for (const auto& edge : edges)
         std::cout << "call: " << edge.first << " -> " << edge.second << "\n";
     ldc::frontend::BuildStats stats;
-    const auto graph = ldc::frontend::buildProgramGraph(*pag, *ander->getCallGraph(), stats);
+    const auto graph = ldc::frontend::buildSimplifiedPAG(*pag, *ander->getCallGraph(), stats);
     graph.printSummary(std::cout);
     std::cout << "Build: " << stats.variantGeps << " variable-offset geps, " << stats.skippedEdges
               << " skipped edges, " << stats.indirectEdges << " indirect call/return edges\n";

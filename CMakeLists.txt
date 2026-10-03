@@ -9,7 +9,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 find_package(SVF CONFIG REQUIRED)
 
 add_library(ldc_frontend
-  src/ProgramGraph.cpp
+  src/SimplifiedPAG.cpp
   src/SVFEdges.cpp
   src/SVFFrontend.cpp)
 target_compile_features(ldc_frontend PUBLIC cxx_std_17)

@@ -1,4 +1,4 @@
-#include "ldc/ProgramGraph.h"
+#include "ldc/SimplifiedPAG.h"
 #include <array>
 #include <ostream>
 
@@ -21,7 +21,7 @@ std::string escapeDot(const std::string& text) {
 }
 } // namespace
 
-NodeId ProgramGraph::addNode(const Node& node) {
+NodeId SimplifiedPAG::addNode(const Node& node) {
     if (node.svfId)
         if (auto id = findSvf(*node.svfId)) return *id;
     const NodeId id = static_cast<NodeId>(nodes_.size());
@@ -29,28 +29,28 @@ NodeId ProgramGraph::addNode(const Node& node) {
     if (node.svfId) bySvf_.emplace(*node.svfId, id);
     return id;
 }
-std::optional<NodeId> ProgramGraph::findSvf(SvfId id) const {
+std::optional<NodeId> SimplifiedPAG::findSvf(SvfId id) const {
     auto it = bySvf_.find(id);
     return it == bySvf_.end() ? std::nullopt : std::optional<NodeId>(it->second);
 }
-CallSiteId ProgramGraph::addCallSite(const CallSite& site) {
+CallSiteId SimplifiedPAG::addCallSite(const CallSite& site) {
     sites_.push_back(site);
     return static_cast<CallSiteId>(sites_.size() - 1);
 }
-void ProgramGraph::addEdge(const Edge& edge) { edges_.push_back(edge); }
-const std::vector<Node>& ProgramGraph::nodes() const { return nodes_; }
-const std::vector<Edge>& ProgramGraph::edges() const { return edges_; }
-const std::vector<CallSite>& ProgramGraph::callSites() const { return sites_; }
-void ProgramGraph::printSummary(std::ostream& out) const {
-    out << "ProgramGraph: " << nodes_.size() << " nodes, " << edges_.size() << " edges, "
+void SimplifiedPAG::addEdge(const Edge& edge) { edges_.push_back(edge); }
+const std::vector<Node>& SimplifiedPAG::nodes() const { return nodes_; }
+const std::vector<Edge>& SimplifiedPAG::edges() const { return edges_; }
+const std::vector<CallSite>& SimplifiedPAG::callSites() const { return sites_; }
+void SimplifiedPAG::printSummary(std::ostream& out) const {
+    out << "SimplifiedPAG: " << nodes_.size() << " nodes, " << edges_.size() << " edges, "
         << sites_.size() << " call sites\n";
     std::array<std::size_t, 5> counts{};
     for (const auto& edge : edges_) ++counts[static_cast<std::size_t>(edge.label)];
     for (std::size_t i = 0; i < counts.size(); ++i)
         out << "  " << labels[i] << ": " << counts[i] << "\n";
 }
-void ProgramGraph::dumpDot(std::ostream& out) const {
-    out << "digraph ProgramGraph {\n  rankdir=LR;\n";
+void SimplifiedPAG::dumpDot(std::ostream& out) const {
+    out << "digraph SimplifiedPAG {\n  rankdir=LR;\n";
     for (NodeId id = 0; id < nodes_.size(); ++id) {
         const Node& node = nodes_[id];
         std::string text = node.function.empty() ? "" : node.function + "::";

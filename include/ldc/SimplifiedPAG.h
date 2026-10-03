@@ -60,7 +60,7 @@ struct CallSite {
 
 // Owns its data: it remains usable after SVF and LLVM have been released.
 // Clients can also construct a graph directly, without running SVF.
-class ProgramGraph {
+class SimplifiedPAG {
 public:
     // Interns nodes with an SVF ID. Nodes without an SVF ID are always distinct.
     NodeId addNode(const Node& node);
