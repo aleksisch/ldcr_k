@@ -5,33 +5,120 @@ and prints sorted, unique call-graph edges as `call: <caller> -> <callee>`.
 Function names use LLVM linkage names. The graph includes direct calls and
 indirect/virtual targets resolved by Andersen; its precision is SVF's.
 
-## Build and test
+## Native setup (Ubuntu 24.04, Bash)
 
-The Dockerfile provides the SVF/LLVM toolchain and CMake package paths:
+### 1. Install build prerequisites
 
 ```sh
-docker build -t ldc-dev .
-docker run --rm -u "$(id -u):$(id -g)" -v "$PWD":/work -w /work ldc-dev \
-  sh -c 'cmake -S . -B build && cmake --build build -j2 && ctest --test-dir build --output-on-failure'
+sudo apt update
+sudo apt install build-essential cmake ninja-build git curl wget unzip xz-utils \
+  libncurses-dev zlib1g-dev libzstd-dev libffi-dev libxml2-dev
 ```
 
-`cmake/LdcIR.cmake` compiles C++ to LLVM IR with debug information and runs
-`mem2reg` using the image's clang++ and opt. Tests check direct and resolved
-function-pointer edges, DOT exports, and missing-input failure.
+CMake 3.23 or newer is needed to build the pinned SVF revision. Keep the same
+LLVM installation for building SVF, linking this driver, and producing input IR.
+
+### 2. Build SVF and its dependencies
+
+Use a separate directory for dependencies. These commands pin SVF so that its
+C++ API cannot change underneath the project:
+
+```sh
+export LDCR_DEPS="$HOME/.local/share/ldcr-deps"
+mkdir -p "$LDCR_DEPS"
+git clone https://github.com/SVF-tools/SVF.git "$LDCR_DEPS/SVF"
+git -C "$LDCR_DEPS/SVF" checkout f78454fb8d71b0d16c80a6f009b8a1d1c20c75e5
+
+(
+  cd "$LDCR_DEPS/SVF"
+  unset LLVM_DIR Z3_DIR
+  SVF_BUILD_JOBS=2 bash ./build.sh
+)
+
+# The pinned SVF build exports this include path without creating it.
+mkdir -p "$LDCR_DEPS/SVF/Release-build/include/SVF"
+```
+
+SVF's [build script](https://github.com/SVF-tools/SVF/blob/f78454fb8d71b0d16c80a6f009b8a1d1c20c75e5/build.sh)
+downloads LLVM/Clang 21.1.0 and Z3 4.15.4, then builds SVF locally. It needs
+network access and several GB of free disk space. Adjust `SVF_BUILD_JOBS` for
+your available memory. Re-running `build.sh` recreates SVF's `Release-build`.
+
+### 3. Configure your shell
+
+Run this in each new shell before configuring or using the driver (or save it
+in a shell file and source it):
+
+```sh
+export LDCR_DEPS="$HOME/.local/share/ldcr-deps"
+export SVF_DIR="$LDCR_DEPS/SVF/Release-build/lib/cmake/SVF"
+export LLVM_DIR="$LDCR_DEPS/SVF/llvm-21.1.0.obj/lib/cmake/llvm"
+export Z3_DIR="$LDCR_DEPS/SVF/z3.obj"
+export PATH="$LDCR_DEPS/SVF/llvm-21.1.0.obj/bin:$PATH"
+export LD_LIBRARY_PATH="$LDCR_DEPS/SVF/Release-build/lib:$LDCR_DEPS/SVF/Release-build/svf:$LDCR_DEPS/SVF/Release-build/svf-llvm:$LDCR_DEPS/SVF/llvm-21.1.0.obj/lib:$Z3_DIR/bin${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+```
+
+Here `SVF_DIR` and `LLVM_DIR` are directories containing `SVFConfig.cmake` and
+`LLVMConfig.cmake`; `Z3_DIR` is the Z3 installation root. SVF's own `setup.sh`
+uses different directory conventions, so use the values above for this project.
+
+### 4. Build and test this repository
+
+From your repository checkout:
+
+```sh
+cmake -S . -B build-native -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DSVF_DIR="$SVF_DIR" -DLLVM_DIR="$LLVM_DIR" -DZ3_DIR="$Z3_DIR"
+cmake --build build-native --parallel 2
+ctest --test-dir build-native --output-on-failure
+```
+
+Both tests should pass. They check direct and resolved function-pointer edges,
+DOT exports, and missing-input failure. The CMake helper compiles the fixture
+with clang++ and runs `mem2reg` with opt from the selected LLVM installation.
 
 ## Inspect a call graph
 
-Inside the development image:
-
 ```sh
-build/ldc -stat=false build/tests/call_graph.ll
-build/ldc -stat=false -dump-callgraph build/tests/call_graph.ll
+build-native/ldc -stat=false build-native/tests/call_graph.ll
+build-native/ldc -stat=false -dump-callgraph build-native/tests/call_graph.ll
 ```
 
 SVF's `-dump-callgraph` writes `callgraph_initial.dot` and
 `callgraph_final.dot` in the working directory. The latter includes Andersen's
-resolved calls. The driver accepts LLVM textual IR or bitcode inputs supported
-by SVF. It releases the analysis, SVFIR, and LLVM module after use.
+resolved calls. Optionally install Graphviz (`sudo apt install graphviz`) and
+render it with `dot -Tsvg callgraph_final.dot -o callgraph.svg`.
+
+To analyze your own C++ source, use the same LLVM tools:
+
+```sh
+clang++ -S -emit-llvm -g -fno-discard-value-names \
+  -Xclang -disable-O0-optnone example.cpp -o example.raw.ll
+opt -S -passes=mem2reg example.raw.ll -o example.ll
+build-native/ldc -stat=false -dump-callgraph example.ll
+```
+
+Add your program's include paths, language standard, and other compilation flags
+as needed. The driver accepts textual IR or bitcode inputs supported by SVF and
+releases the analysis, SVFIR, and LLVM module after use.
+
+## Existing installations and troubleshooting
+
+- You can reuse an existing SVF build: point `SVF_DIR` at its CMake package,
+  `LLVM_DIR` at the LLVM package used to build it, and `Z3_DIR` at its Z3
+  installation. Native validation also passes with the pinned SVF revision and
+  LLVM/Clang 22 on Ubuntu 24.04.
+- If CMake reports a missing `include/SVF` directory in SVF's build tree, create
+  that empty directory as shown in step 2; the actual headers come from SVF's
+  source tree and generated include directory.
+- If clang++ or opt is missing, install both for the selected LLVM version.
+  For a custom layout, pass `-DLDC_CLANGXX=/absolute/path/to/clang++` and
+  `-DLDC_OPT=/absolute/path/to/opt` when configuring. Do not mix LLVM versions.
+- If shared libraries cannot be loaded, reapply the shell environment in step 3;
+  for a custom installation, use its SVF, LLVM, and Z3 library directories.
+- After changing dependency paths or compiler versions, use a fresh build
+  directory so that CMake does not reuse stale cached paths.
 
 The repository's existing PLAN.md describes the larger research project.
 LDCR graph construction, context-sensitive solvers, proofs, and evaluation are

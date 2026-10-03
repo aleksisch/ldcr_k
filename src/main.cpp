@@ -23,8 +23,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // Same entry sequence as SVF's `wpa`, without LLVMModuleSet::preProcessBCs(): it writes
-    // `<name>.pre.bc`, which fails in the svftools/svf image and crashes the process.
+    // Build the module in memory without writing preprocessing bitcode files.
     LLVMModuleSet::buildSVFModule(modules);
 
     SVFIRBuilder builder;
