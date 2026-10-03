@@ -5,6 +5,10 @@ and prints sorted, unique call-graph edges as `call: <caller> -> <callee>`.
 Function names use LLVM linkage names. The graph includes direct calls and
 indirect/virtual targets resolved by Andersen; its precision is SVF's.
 
+The reusable `ldc_frontend` library also builds an owning `ProgramGraph` with
+variable/object nodes, SVF ID lookup, pointer-flow edges, call-site metadata,
+and source/debug names. Its headers live in `include/ldc/`.
+
 ## Native setup (Ubuntu 24.04, Bash)
 
 ### 1. Install build prerequisites
@@ -74,9 +78,10 @@ cmake --build build-native --parallel 2
 ctest --test-dir build-native --output-on-failure
 ```
 
-The infrastructure tests check direct and resolved function-pointer edges,
-DOT exports, and missing-input failure. The CMake helper compiles the fixture
-with clang++ and runs `mem2reg` with opt from the selected LLVM installation.
+The tests check direct and resolved function-pointer calls, nested field offsets,
+argument/return flow, source/debug information, IR without debug information,
+DOT export, and input/output errors. The CMake helper compiles fixtures with
+clang++ and runs `mem2reg` with opt from the selected LLVM installation.
 
 ## Inspect a call graph
 
@@ -102,6 +107,57 @@ build-native/ldc -stat=false -dump-callgraph example.ll
 Add your program's include paths, language standard, and other compilation flags
 as needed. The driver accepts textual IR or bitcode inputs supported by SVF and
 releases the analysis, SVFIR, and LLVM module after use.
+
+## Inspect the pointer-flow graph
+
+```sh
+build-native/ldc -stat=false -program-dot=program.dot build-native/tests/pointer_flow.ll
+```
+
+`program.dot` contains variable/object nodes, source names and locations, and
+`new`, `assign`, `store[field]`, `load[field]`, and `gep[field]` edges. Call
+argument and return edges carry `enter@site` / `exit@site` labels. Separate
+call-site notes list resolved targets, including calls without pointer flow.
+
+The frontend folds loads/stores through GEPs onto their base pointer and flattened
+struct offset. Escaping field addresses retain explicit `gep` edges. Phi/select
+inputs become assignment edges. Indirect and virtual call connections come from
+Andersen's resolved call graph; unresolved call sites remain present with no
+targets. This does not perform a new points-to analysis or infer missing targets.
+
+### Use the library
+
+Link a CMake target against `ldc_frontend`, then use the API while SVF is alive:
+
+```cpp
+#include "ldc/SVFFrontend.h"
+
+ldc::frontend::BuildStats stats;
+auto graph = ldc::frontend::buildProgramGraph(*pag, *andersen->getCallGraph(), stats);
+graph.dumpDot(output);
+```
+
+`ProgramGraph` owns its nodes, edges, and metadata, so it remains usable after
+SVF/LLVM cleanup. You can construct one directly with `addNode`, `addEdge`, and
+`addCallSite`; nodes with an SVF ID are interned, while nodes without one stay
+distinct. `findSvf` maps SVF IDs back to graph node IDs. `SVFEdges.h` additionally
+exposes the shared statement/call extraction for specialized graph builders;
+its results contain non-owning SVF pointers and require SVF to remain alive.
+
+Each call site records its caller, source location, direct/indirect/virtual flags,
+actual arguments, return value, and resolved targets with their formals/return.
+Missing argument nodes use empty optionals to preserve parameter positions.
+Function names in this API are demangled; the driver's `call:` lines retain LLVM
+linkage names. Source locations retain SVF's location text plus the line number.
+Debug records supply a source variable name when possible; aliases of one SSA
+value share the first recovered name. Without debug information the graph uses
+IR/generated names and line 0.
+
+The extraction retains the original frontend's abstraction: constants, dummy
+nodes, analysis-created field objects, and intrinsic-local values are excluded;
+array indices follow SVF's abstraction and unknown field offsets use `*`.
+Skipped edges and variable-offset GEPs are reported. Class hierarchy/vtable
+modeling and LDCR dispatch labels are left to the follow-up analysis.
 
 ## Existing installations and troubleshooting
 

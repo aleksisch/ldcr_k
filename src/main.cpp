@@ -1,6 +1,7 @@
 // ldc — L_DC prototype driver.
 
 #include "ldc/Builder.h"
+#include "ldc/SVFFrontend.h"
 #include "ldc/LDGraph.h"
 #include "ldc/P3Ctx.h"
 #include "ldc/Solver.h"
@@ -12,10 +13,6 @@
 #include "Util/CommandLine.h"
 #include "Util/Options.h"
 #include "WPA/Andersen.h"
-
-#include <llvm/Demangle/Demangle.h>
-#include <llvm/IR/DebugInfoMetadata.h>
-#include <llvm/IR/DebugProgramInstruction.h>
 
 #include <chrono>
 #include <filesystem>
@@ -31,6 +28,7 @@
 using namespace SVF;
 
 namespace {
+const Option<std::string> GraphOut("program-dot", "Write the common pointer-flow graph to DOT", "");
 
 const Option<std::string> DotOut("ldc-dot", "Write LDGraph to this Graphviz file", "");
 const Option<u32_t> ContextDepth("ldc-k", "Context depth k", 0);
@@ -64,24 +62,8 @@ std::string functionKey(const std::string& name) { return name.substr(0, name.fi
 /// only in debug records. Formals keep their IR names.
 std::unordered_map<ldc::SvfId, std::string> debugNames() {
     std::unordered_map<ldc::SvfId, std::string> names;
-    LLVMModuleSet* modules = LLVMModuleSet::getLLVMModuleSet();
-    auto record = [&](const llvm::Value* value, const std::string& name) {
-        if (value != nullptr && modules->hasValueNode(value))
-            names.emplace(modules->getValueNode(value), name);
-    };
-    for (u32_t i = 0; i < modules->getModuleNum(); ++i)
-        for (const llvm::Function& fn : *modules->getModule(i)) {
-            const std::string function = functionKey(llvm::demangle(fn.getName().str()));
-            for (const llvm::Argument& arg : fn.args())
-                if (arg.hasName()) record(&arg, function + "::" + arg.getName().str());
-            for (const llvm::BasicBlock& block : fn)
-                for (const llvm::Instruction& inst : block)
-                    for (const llvm::DbgVariableRecord& dvr :
-                         llvm::filterDbgVars(inst.getDbgRecordRange()))
-                        if (dvr.getVariable() != nullptr)
-                            record(dvr.getVariableLocationOp(0),
-                                   function + "::" + dvr.getVariable()->getName().str());
-        }
+    for (const auto& [id, source] : ldc::frontend::debugNames())
+        names.emplace(id, functionKey(source.function) + "::" + source.name);
     return names;
 }
 
@@ -215,6 +197,27 @@ int main(int argc, char** argv) {
     }
     for (const auto& edge : edges)
         std::cout << "call: " << edge.first << " -> " << edge.second << "\n";
+
+    if (!GraphOut().empty()) {
+        ldc::frontend::BuildStats stats;
+        const auto graph = ldc::frontend::buildProgramGraph(*pag, *ander->getCallGraph(), stats);
+        graph.printSummary(std::cout);
+        std::cout << "Build: " << stats.variantGeps << " variable-offset geps, "
+                  << stats.skippedEdges << " skipped edges, " << stats.indirectEdges
+                  << " indirect call/return edges\n";
+        bool ok = true;
+        std::ofstream out(GraphOut());
+        graph.dumpDot(out);
+        out.close();
+        if (!out) {
+            std::cerr << "Cannot write program graph: " << GraphOut() << "\n";
+            ok = false;
+        }
+        AndersenWaveDiff::releaseAndersenWaveDiff();
+        SVFIR::releaseSVFIR();
+        LLVMModuleSet::releaseLLVMModuleSet();
+        return ok ? 0 : 1;
+    }
 
     ldc::SolverOptions options;
     options.k = ContextDepth();
