@@ -181,6 +181,19 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    if (!GraphOut().empty()) {
+        const auto result = ldc::frontend::analyzeModules(modules);
+        result.printSummary(std::cout);
+        std::ofstream out(GraphOut());
+        result.graph.dumpDot(out);
+        out.close();
+        if (!out) {
+            std::cerr << "Cannot write program graph: " << GraphOut() << "\n";
+            return 1;
+        }
+        return 0;
+    }
+
     // Build the module in memory without writing preprocessing bitcode files.
     LLVMModuleSet::buildSVFModule(modules);
 
@@ -198,28 +211,6 @@ int main(int argc, char** argv) {
     }
     for (const auto& edge : edges)
         std::cout << "call: " << edge.first << " -> " << edge.second << "\n";
-
-
-    if (!GraphOut().empty()) {
-        ldc::frontend::BuildStats stats;
-        const auto graph = ldc::frontend::buildSimplifiedPAG(*pag, *ander->getCallGraph(), stats);
-        graph.printSummary(std::cout);
-        std::cout << "Build: " << stats.variantGeps << " variable-offset geps, "
-                  << stats.skippedEdges << " skipped edges, " << stats.indirectEdges
-                  << " indirect call/return edges\n";
-        bool ok = true;
-        std::ofstream out(GraphOut());
-        graph.dumpDot(out);
-        out.close();
-        if (!out) {
-            std::cerr << "Cannot write program graph: " << GraphOut() << "\n";
-            ok = false;
-        }
-        AndersenWaveDiff::releaseAndersenWaveDiff();
-        SVFIR::releaseSVFIR();
-        LLVMModuleSet::releaseLLVMModuleSet();
-        return ok ? 0 : 1;
-    }
 
     ldc::SolverOptions options;
     options.k = ContextDepth();

@@ -2,6 +2,10 @@
 #include "SVFDetails.h"
 #include "Graphs/CallGraph.h"
 #include "SVF-LLVM/LLVMModule.h"
+#include "SVF-LLVM/SVFIRBuilder.h"
+#include "WPA/Andersen.h"
+#include <ostream>
+#include <stdexcept>
 #include "SVFIR/SVFIR.h"
 #include <llvm/Demangle/Demangle.h>
 #include <llvm/IR/DebugInfoMetadata.h>
@@ -158,6 +162,43 @@ private:
 SimplifiedPAG buildSimplifiedPAG(SVFIR& pag, const CallGraph& calls, BuildStats& stats) {
     stats = {};
     return Builder(pag, calls, stats).run();
+}
+
+void FrontendResult::printSummary(std::ostream& out) const {
+    out << "SVFIR: " << svfNodeCount << " nodes\n";
+    for (const auto& [caller, callee] : calls)
+        out << "call: " << caller << " -> " << callee << "\n";
+    graph.printSummary(out);
+    out << "Build: " << stats.variantGeps << " variable-offset geps, " << stats.skippedEdges
+        << " skipped edges, " << stats.indirectEdges << " indirect call/return edges\n";
+}
+
+FrontendResult analyzeModules(const std::vector<std::string>& modules) {
+    if (modules.empty()) throw std::invalid_argument("No LLVM IR input modules");
+    // Release in reverse dependency order, including when result construction throws.
+    struct Session {
+        ~Session() {
+            AndersenWaveDiff::releaseAndersenWaveDiff();
+            SVFIR::releaseSVFIR();
+            LLVMModuleSet::releaseLLVMModuleSet();
+        }
+    } session;
+    LLVMModuleSet::buildSVFModule(modules);
+    SVFIRBuilder builder;
+    auto* pag = builder.build();
+    auto* andersen = AndersenWaveDiff::createAndersenWaveDiff(pag);
+
+    FrontendResult result;
+    result.svfNodeCount = pag->getTotalNodeNum();
+    std::set<std::pair<std::string, std::string>> calls;
+    for (const auto& entry : *andersen->getCallGraph()) {
+        const auto* caller = entry.second;
+        for (const auto* edge : caller->getOutEdges())
+            calls.emplace(caller->getName(), edge->getDstNode()->getName());
+    }
+    result.calls.assign(calls.begin(), calls.end());
+    result.graph = buildSimplifiedPAG(*pag, *andersen->getCallGraph(), result.stats);
+    return result;
 }
 
 } // namespace ldc::frontend
