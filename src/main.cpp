@@ -11,7 +11,7 @@
 #include "SVF-LLVM/LLVMModule.h"
 #include "SVF-LLVM/LLVMUtil.h"
 #include "SVF-LLVM/SVFIRBuilder.h"
-#include "Util/CommandLine.h"
+#include "CommandLine.h"
 #include "Util/Options.h"
 #include "WPA/Andersen.h"
 
@@ -29,18 +29,6 @@
 using namespace SVF;
 
 namespace {
-const Option<std::string> GraphOut("program-dot", "Write the common pointer-flow graph to DOT", "");
-
-const Option<std::string> DotOut("ldc-dot", "Write LDGraph to this Graphviz file", "");
-const Option<u32_t> ContextDepth("ldc-k", "Context depth k", 0);
-const Option<std::string> Mode("ldc-mode", "Analysis: lfc | kcfa | ldc | ldcr", "lfc");
-const Option<std::string> SourceFile("ldc-src", "C++ source file, for object labels", "");
-const Option<std::string> FactsOut("ldc-facts", "Write the facts to this file", "");
-const Option<bool> P3Ctx("ldc-p3ctx", "Contexts only where they can matter (P3Ctx)", false);
-const Option<std::string>
-    ExportDir("ldc-export", "Write the graph for cfl/ldcr.py to this directory and stop", "");
-const Option<bool> CompareAndersen("ldc-andersen", "Compare PTS with SVF Andersen", false);
-
 /// Σ|pts| over variables (contexts merged), virtual call edges, polymorphic call sites.
 void printResult(const ldc::LDGraph& graph, const ldc::Solver& solver) {
     std::size_t total = 0;
@@ -81,9 +69,9 @@ std::unordered_map<int, std::string> lineLabels(const std::string& path) {
 
 /// Text of every node, stable between runs: variables by their debug name, objects by the
 /// label of their allocation line.
-std::vector<std::string> nodeTexts(const ldc::LDGraph& graph) {
+std::vector<std::string> nodeTexts(const ldc::LDGraph& graph, const std::string& sourceFile) {
     const auto names = debugNames();
-    const auto labels = lineLabels(SourceFile());
+    const auto labels = lineLabels(sourceFile);
     std::vector<std::string> texts;
     for (const ldc::Node& node : graph.nodes()) {
         if (node.kind == ldc::NodeKind::Obj) {
@@ -105,8 +93,9 @@ std::string siteText(const ldc::CallSite& site) {
 }
 
 /// One `var[ ctx ] -> obj[ heap ctx ]` line per fact.
-void writeFacts(const ldc::LDGraph& graph, const ldc::Solver& solver, const std::string& path) {
-    const auto texts = nodeTexts(graph);
+void writeFacts(const ldc::LDGraph& graph, const ldc::Solver& solver, const std::string& path,
+                const std::string& sourceFile) {
+    const auto texts = nodeTexts(graph, sourceFile);
     auto context = [&](const ldc::Solver::CallString& ctx) {
         std::string t = "[";
         for (ldc::CallSiteId c : ctx)
@@ -126,9 +115,9 @@ void writeFacts(const ldc::LDGraph& graph, const ldc::Solver& solver, const std:
 /// nodes.tsv (id kind function type fieldLimit insensitive text), edges.tsv (src dst label
 /// field type site dir), sites.tsv (id caller text), subtypes.tsv (object offset type).
 void writeExport(const ldc::LDGraph& graph, const std::vector<bool>& insensitive,
-                 const std::string& dir) {
+                 const std::string& dir, const std::string& sourceFile) {
     std::filesystem::create_directories(dir);
-    const auto texts = nodeTexts(graph);
+    const auto texts = nodeTexts(graph, sourceFile);
     std::ofstream nodes(dir + "/nodes.tsv");
     for (ldc::NodeId n = 0; n < graph.nodes().size(); ++n) {
         const ldc::Node& node = graph.nodes()[n];
@@ -173,22 +162,22 @@ std::size_t compareWithAndersen(const ldc::LDGraph& graph, const ldc::Solver& so
 
 } // namespace
 
-int main(int argc, char** argv) {
-    std::vector<std::string> modules =
-        OptionBase::parseOptions(argc, argv, "ldc: L_DC prototype", "[options] <input.ll>");
-    if (modules.empty()) {
-        std::cerr << "usage: ldc [options] <input.ll>\n";
-        return 1;
+int main(int argc, char** argv) try {
+    const auto cli = ldc::parseCommandLine(argc, argv);
+    if (cli.help) {
+        ldc::printHelp(std::cout);
+        return 0;
     }
+    const auto& modules = cli.modules;
 
-    if (!GraphOut().empty()) {
+    if (!cli.programDot.empty()) {
         const auto result = ldc::frontend::analyzeModules(modules);
         result.printSummary(std::cout);
-        std::ofstream out(GraphOut());
+        std::ofstream out(cli.programDot);
         result.graph.dumpDot(out);
         out.close();
         if (!out) {
-            std::cerr << "Cannot write program graph: " << GraphOut() << "\n";
+            std::cerr << "Cannot write program graph: " << cli.programDot << "\n";
             return 1;
         }
         return 0;
@@ -213,34 +202,34 @@ int main(int argc, char** argv) {
         std::cout << "call: " << edge.first << " -> " << edge.second << "\n";
 
     ldc::SolverOptions options;
-    options.k = ContextDepth();
-    if (Mode() == "lfc")
+    options.k = cli.k;
+    if (cli.mode == "lfc")
         options.mode = ldc::Mode::Lfc;
-    else if (Mode() == "kcfa")
+    else if (cli.mode == "kcfa")
         options.mode = ldc::Mode::Kcfa;
-    else if (Mode() == "ldc")
+    else if (cli.mode == "ldc")
         options.mode = ldc::Mode::Ldc;
-    else if (Mode() == "ldcr")
+    else if (cli.mode == "ldcr")
         options.mode = ldc::Mode::Ldcr;
     else {
-        std::cerr << "ldc: unknown -ldc-mode=" << Mode() << " (lfc | kcfa | ldc | ldcr)\n";
+        std::cerr << "ldc: unknown -ldc-mode=" << cli.mode << " (lfc | kcfa | ldc | ldcr)\n";
         return 2;
     }
-    options.allFunctionsReachable = CompareAndersen();
+    options.allFunctionsReachable = cli.compareAndersen;
 
     ldc::BuildStats stats;
     ldc::LDGraph graph = ldc::buildLDGraph(*pag, *ander->getCallGraph(), options.mode, stats);
     graph.printSummary(std::cout);
     stats.print(std::cout);
-    if (P3Ctx()) {
+    if (cli.p3ctx) {
         options.insensitive = ldc::contextInsensitiveNodes(graph);
         std::size_t kept = 0;
         for (bool insensitive : options.insensitive) kept += !insensitive;
         std::cout << "P3Ctx: " << kept << " of " << graph.nodes().size()
                   << " nodes context-sensitive\n";
     }
-    if (!ExportDir().empty()) {
-        writeExport(graph, options.insensitive, ExportDir());
+    if (!cli.exportDir.empty()) {
+        writeExport(graph, options.insensitive, cli.exportDir, cli.sourceFile);
         return 0;
     }
 
@@ -249,25 +238,28 @@ int main(int argc, char** argv) {
     solver.solve();
     const double seconds =
         std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-    std::cout << "Solver [" << Mode() << ", k = " << options.k << "]: fixpoint after "
+    std::cout << "Solver [" << cli.mode << ", k = " << options.k << "]: fixpoint after "
               << solver.iterations() << " steps, " << seconds << " s, " << solver.contextCount()
               << " contexts, " << solver.methodContextCount() << " (function, context) pairs\n";
     printResult(graph, solver);
-    if (!FactsOut().empty()) writeFacts(graph, solver, FactsOut());
+    if (!cli.facts.empty()) writeFacts(graph, solver, cli.facts, cli.sourceFile);
 
     bool ok = true;
-    if (CompareAndersen()) {
+    if (cli.compareAndersen) {
         std::size_t mismatches = compareWithAndersen(graph, solver, *ander);
         std::cout << "Andersen comparison: " << mismatches << " mismatching variables\n";
         ok &= mismatches == 0;
     }
-    if (!DotOut().empty()) {
-        std::ofstream dot(DotOut());
+    if (!cli.analysisDot.empty()) {
+        std::ofstream dot(cli.analysisDot);
         graph.dumpDot(dot);
-        std::cout << "LDGraph written to " << DotOut() << "\n";
+        std::cout << "LDGraph written to " << cli.analysisDot << "\n";
     }
     AndersenWaveDiff::releaseAndersenWaveDiff();
     SVFIR::releaseSVFIR();
     LLVMModuleSet::releaseLLVMModuleSet();
     return ok ? 0 : 1;
+} catch (const std::exception& error) {
+    std::cerr << "ldc: " << error.what() << "\n";
+    return 1;
 }

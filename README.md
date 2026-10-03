@@ -83,14 +83,12 @@ clang++ and runs `mem2reg` with opt from the selected LLVM installation.
 ## Inspect a call graph
 
 ```sh
-build-native/ldc -stat=false build-native/tests/call_graph.ll
-build-native/ldc -stat=false -dump-callgraph build-native/tests/call_graph.ll
+build-native/ldc build-native/tests/call_graph.ll
+build-native/ldc --help
 ```
 
-SVF's `-dump-callgraph` writes `callgraph_initial.dot` and
-`callgraph_final.dot` in the working directory. The latter includes Andersen's
-resolved calls. Optionally install Graphviz (`sudo apt install graphviz`) and
-render it with `dot -Tsvg callgraph_final.dot -o callgraph.svg`.
+The tool prints sorted caller/callee pairs, including resolved indirect calls.
+`--help` lists only the options implemented by `ldc`.
 
 To analyze your own C++ source, use the same LLVM tools:
 
@@ -98,7 +96,7 @@ To analyze your own C++ source, use the same LLVM tools:
 clang++ -S -emit-llvm -g -fno-discard-value-names \
   -Xclang -disable-O0-optnone example.cpp -o example.raw.ll
 opt -S -passes=mem2reg example.raw.ll -o example.ll
-build-native/ldc -stat=false -dump-callgraph example.ll
+build-native/ldc example.ll
 ```
 
 Add your program's include paths, language standard, and other compilation flags
@@ -108,7 +106,7 @@ releases the analysis, SVFIR, and LLVM module after use.
 ## Inspect the pointer-flow graph
 
 ```sh
-build-native/ldc -stat=false -program-dot=program.dot build-native/tests/pointer_flow.ll
+build-native/ldc --program-dot program.dot build-native/tests/pointer_flow.ll
 ```
 
 `program.dot` contains variable/object nodes, source names and locations, and
@@ -127,8 +125,8 @@ targets. This does not perform a new points-to analysis or infer missing targets
 Link a CMake target against `ldc_frontend`. For a complete run from LLVM IR,
 `analyzeModules({"input.ll"})` loads the modules, runs Andersen, and returns an
 owned `FrontendResult` containing the simplified PAG, call edges, and statistics.
-SVF/LLVM are released before it returns. Parse SVF options before calling it;
-it uses process-global state and cannot overlap another SVF session.
+SVF/LLVM are released before it returns. It uses process-global state and cannot
+overlap another SVF session.
 
 If you already manage SVF yourself, build the simplified PAG while SVF is alive:
 

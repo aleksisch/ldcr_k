@@ -22,6 +22,7 @@ target_include_directories(ldc_frontend PUBLIC include)
 target_link_libraries(ldc_frontend PUBLIC SVF::SvfLLVM SVF::SvfCore)
 
 add_executable(ldc
+  src/CommandLine.cpp
   src/main.cpp
   src/LDGraph.cpp
   src/Builder.cpp

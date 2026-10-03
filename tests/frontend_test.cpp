@@ -1,7 +1,6 @@
 #include "ldc/SimplifiedPAG.h"
 #include "ldc/SVFFrontend.h"
 #include "SVF-LLVM/SVFIRBuilder.h"
-#include "Util/CommandLine.h"
 #include "WPA/Andersen.h"
 #include <iostream>
 #include <limits>
@@ -138,8 +137,8 @@ void checkManualGraph() {
 
 } // namespace
 int main(int argc, char** argv) {
-    const auto inputs = OptionBase::parseOptions(argc, argv, "frontend test", "<input.ll>");
-    if (inputs.size() != 1) return 1;
+    if (argc != 2) return 1;
+    const std::vector<std::string> inputs{argv[1]};
     SVF::LLVMModuleSet::buildSVFModule(inputs);
     SVF::SVFIRBuilder builder;
     auto* pag = builder.build();
