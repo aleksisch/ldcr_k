@@ -136,9 +136,17 @@ graph.dumpDot(output);
 `ProgramGraph` owns its nodes, edges, and metadata, so it remains usable after
 SVF/LLVM cleanup. You can construct one directly with `addNode`, `addEdge`, and
 `addCallSite`; nodes with an SVF ID are interned, while nodes without one stay
-distinct. `findSvf` maps SVF IDs back to graph node IDs. `SVFEdges.h` additionally
-exposes the shared statement/call extraction for specialized graph builders;
-its results contain non-owning SVF pointers and require SVF to remain alive.
+distinct. `findSvf` maps SVF IDs back to graph node IDs. Read the graph through
+`nodes()`, `edges()`, and `callSites()`; export it with `dumpDot()` or inspect
+counts with `printSummary()`.
+
+The public headers are `ProgramGraph.h` (owned graph records and operations) and
+`SVFFrontend.h` (`buildProgramGraph` and `BuildStats`). Statement/call extraction
+and debug-name helpers are private implementation details in `src/`.
+
+Missing SVF IDs, edge fields, and call-site IDs use `std::optional`, rather than
+reserved integer values. The one field constant, `kAnyField`, represents an
+unknown offset; it differs from an absent field and from offset zero.
 
 Each call site records its caller, source location, direct/indirect/virtual flags,
 actual arguments, return value, and resolved targets with their formals/return.

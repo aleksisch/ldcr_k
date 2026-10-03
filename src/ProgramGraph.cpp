@@ -22,11 +22,11 @@ std::string escapeDot(const std::string& text) {
 } // namespace
 
 NodeId ProgramGraph::addNode(const Node& node) {
-    if (node.svfId != kNoSvfId)
-        if (auto id = findSvf(node.svfId)) return *id;
+    if (node.svfId)
+        if (auto id = findSvf(*node.svfId)) return *id;
     const NodeId id = static_cast<NodeId>(nodes_.size());
     nodes_.push_back(node);
-    if (node.svfId != kNoSvfId) bySvf_.emplace(node.svfId, id);
+    if (node.svfId) bySvf_.emplace(*node.svfId, id);
     return id;
 }
 std::optional<NodeId> ProgramGraph::findSvf(SvfId id) const {
@@ -37,6 +37,10 @@ CallSiteId ProgramGraph::addCallSite(const CallSite& site) {
     sites_.push_back(site);
     return static_cast<CallSiteId>(sites_.size() - 1);
 }
+void ProgramGraph::addEdge(const Edge& edge) { edges_.push_back(edge); }
+const std::vector<Node>& ProgramGraph::nodes() const { return nodes_; }
+const std::vector<Edge>& ProgramGraph::edges() const { return edges_; }
+const std::vector<CallSite>& ProgramGraph::callSites() const { return sites_; }
 void ProgramGraph::printSummary(std::ostream& out) const {
     out << "ProgramGraph: " << nodes_.size() << " nodes, " << edges_.size() << " edges, "
         << sites_.size() << " call sites\n";
@@ -53,18 +57,19 @@ void ProgramGraph::dumpDot(std::ostream& out) const {
         text += node.sourceName.empty() ? node.name : node.sourceName;
         if (node.line) text += " @" + std::to_string(node.line);
         out << "  n" << id << " [shape=" << (node.kind == NodeKind::Obj ? "box" : "ellipse")
-            << ", label=\"" << escapeDot(text) << "\", svf_id=\"" << node.svfId << "\", source=\""
-            << escapeDot(node.sourceLocation) << "\"];\n";
+            << ", label=\"" << escapeDot(text) << "\"";
+        if (node.svfId) out << ", svf_id=\"" << *node.svfId << "\"";
+        out << ", source=\"" << escapeDot(node.sourceLocation) << "\"];\n";
     }
     for (const Edge& edge : edges_) {
         std::string text = labels[static_cast<std::size_t>(edge.label)];
         if (edge.field == kAnyField)
             text += "[*]";
-        else if (edge.field != kNoField)
-            text += "[" + std::to_string(edge.field) + "]";
-        if (edge.dir != CallDir::None)
-            text +=
-                (edge.dir == CallDir::Enter ? " enter@" : " exit@") + std::to_string(edge.callSite);
+        else if (edge.field)
+            text += "[" + std::to_string(*edge.field) + "]";
+        if (edge.dir != CallDir::None && edge.callSite)
+            text += (edge.dir == CallDir::Enter ? " enter@" : " exit@") +
+                    std::to_string(*edge.callSite);
         out << "  n" << edge.src << " -> n" << edge.dst << " [label=\"" << escapeDot(text)
             << "\"];\n";
     }

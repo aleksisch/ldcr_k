@@ -2,7 +2,6 @@
 
 #include "ldc/ProgramGraph.h"
 #include <cstddef>
-#include <unordered_map>
 
 namespace SVF {
 class SVFIR;
@@ -17,15 +16,7 @@ struct BuildStats {
     std::size_t indirectEdges = 0;
 };
 
-struct DebugName {
-    std::string function; // demangled lexical scope, even for aliases of global values
-    std::string name;
-};
-
-// Recover one source name per SVF value. Several source variables may alias the
-// same SSA value; in that case the first available name is retained.
-std::unordered_map<SvfId, DebugName> debugNames();
-int sourceLine(const std::string& sourceLocation);
+// Copies the SVF graph and metadata into an independently owned graph.
 ProgramGraph buildProgramGraph(SVF::SVFIR& pag, const SVF::CallGraph& callGraph, BuildStats& stats);
 
 } // namespace ldc::frontend
