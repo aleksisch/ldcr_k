@@ -64,7 +64,7 @@ std::string functionKey(const std::string& name) { return name.substr(0, name.fi
 std::unordered_map<ldc::SvfId, std::string> debugNames() {
     std::unordered_map<ldc::SvfId, std::string> names;
     for (const auto& [id, source] : ldc::frontend::detail::debugNames())
-        names.emplace(id, functionKey(source.function) + "::" + source.name);
+        names.emplace(id.value, functionKey(source.function) + "::" + source.name);
     return names;
 }
 

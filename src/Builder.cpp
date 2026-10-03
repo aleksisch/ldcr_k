@@ -396,7 +396,7 @@ private:
             }
             const NodeId from = node(e.src); // before node(e.dst): node ids follow this order
             graph_.addEdge(Edge{from, node(e.dst), analysisLabel(e.label),
-                                e.field.value_or(kNoField), kUnknownType, site,
+                                (e.field ? e.field->value : kNoField), kUnknownType, site,
                                 analysisDirection(e.dir)});
         }
     }
