@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ldc/ProgramGraph.h"
+#include "ldc/SimplifiedPAG.h"
 #include <cstddef>
 #include <vector>
 

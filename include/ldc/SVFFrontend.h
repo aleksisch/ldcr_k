@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ldc/ProgramGraph.h"
+#include "ldc/SimplifiedPAG.h"
 #include <cstddef>
 
 namespace SVF {
@@ -17,6 +17,6 @@ struct BuildStats {
 };
 
 // Copies the SVF graph and metadata into an independently owned graph.
-ProgramGraph buildProgramGraph(SVF::SVFIR& pag, const SVF::CallGraph& callGraph, BuildStats& stats);
+SimplifiedPAG buildSimplifiedPAG(SVF::SVFIR& pag, const SVF::CallGraph& callGraph, BuildStats& stats);
 
 } // namespace ldc::frontend

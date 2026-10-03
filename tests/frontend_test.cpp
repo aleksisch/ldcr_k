@@ -1,4 +1,4 @@
-#include "ldc/ProgramGraph.h"
+#include "ldc/SimplifiedPAG.h"
 #include "ldc/SVFFrontend.h"
 #include "SVF-LLVM/SVFIRBuilder.h"
 #include "Util/CommandLine.h"
@@ -16,14 +16,14 @@ void require(bool condition, const char* message) {
 bool startsWith(const std::string& text, const std::string& prefix) {
     return text.rfind(prefix, 0) == 0;
 }
-bool hasEdge(const ProgramGraph& graph, NodeId from, NodeId to, CallDir dir, CallSiteId site) {
+bool hasEdge(const SimplifiedPAG& graph, NodeId from, NodeId to, CallDir dir, CallSiteId site) {
     for (const auto& edge : graph.edges())
         if (edge.src == from && edge.dst == to && edge.label == Label::Assign && edge.dir == dir &&
             edge.callSite == site)
             return true;
     return false;
 }
-void check(const ProgramGraph& graph, bool debug) {
+void check(const SimplifiedPAG& graph, bool debug) {
     bool allocation = false, store = false, load = false, gep = false, merge = false;
     bool sourceName = false, location = false, demangled = false;
     for (NodeId id = 0; id < graph.nodes().size(); ++id) {
@@ -87,7 +87,7 @@ void check(const ProgramGraph& graph, bool debug) {
             "incomplete DOT export");
 }
 void checkManualGraph() {
-    ProgramGraph graph;
+    SimplifiedPAG graph;
     Node object;
     object.kind = NodeKind::Obj;
     object.name = "a\"b\\c\nd";
@@ -122,7 +122,7 @@ int main(int argc, char** argv) {
     auto* pag = builder.build();
     auto* andersen = SVF::AndersenWaveDiff::createAndersenWaveDiff(pag);
     BuildStats stats;
-    const auto graph = buildProgramGraph(*pag, *andersen->getCallGraph(), stats);
+    const auto graph = buildSimplifiedPAG(*pag, *andersen->getCallGraph(), stats);
     SVF::AndersenWaveDiff::releaseAndersenWaveDiff();
     SVF::SVFIR::releaseSVFIR();
     SVF::LLVMModuleSet::releaseLLVMModuleSet();
