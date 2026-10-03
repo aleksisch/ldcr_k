@@ -1,6 +1,6 @@
 # LLVM/SVF infrastructure
 
-A C++17 driver that loads LLVM IR, constructs SVFIR, runs SVF Andersen,
+A C++20 driver that loads LLVM IR, constructs SVFIR, runs SVF Andersen,
 and prints sorted, unique call-graph edges as `call: <caller> -> <callee>`.
 Function names use LLVM linkage names. The graph includes direct calls and
 indirect/virtual targets resolved by Andersen; its precision is SVF's.
@@ -148,7 +148,9 @@ The public headers are `SimplifiedPAG.h` (owned graph records and operations) an
 `SVFFrontend.h` (module analysis, graph extraction, and result statistics). Statement/call extraction
 and debug-name helpers are private implementation details in `src/`.
 
-Node, SVF, and call-site IDs are distinct structs with a `value` member;
+Node, SVF, and call-site IDs use `StrongId<"Name", Value>`, with a `value` member
+and a compile-time debug name such as `NodeId::name`. Different names produce
+distinct types;
 integer conversion and vector indexing are explicit. `FieldOffset` is a separate
 signed offset type. Call-site properties are packed bit-fields accessed through
 `site.flags.isIndirect` and `site.flags.isVirtual`, both initially false.

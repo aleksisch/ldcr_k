@@ -1,28 +1,35 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <iosfwd>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
 namespace ldc::frontend {
 
-template <typename Tag, typename Value> struct StrongId {
-    Value value{};
+template <std::size_t N> struct FixedString {
+    char data[N];
 
-    friend constexpr bool operator==(StrongId lhs, StrongId rhs) noexcept {
-        return lhs.value == rhs.value;
+    constexpr FixedString(const char (&text)[N]) {
+        for (auto i = std::size_t{0}; i < N; ++i) data[i] = text[i];
     }
-
-    friend constexpr bool operator!=(StrongId lhs, StrongId rhs) noexcept { return !(lhs == rhs); }
 };
 
-using NodeId = StrongId<struct NodeIdTag, std::uint32_t>;
-using SvfId = StrongId<struct SvfIdTag, std::uint32_t>;
-using FieldOffset = StrongId<struct FieldOffsetTag, std::int32_t>;
-using CallSiteId = StrongId<struct CallSiteIdTag, std::int32_t>;
+template <FixedString Name, typename Value> struct StrongId {
+    Value value{};
+    static constexpr std::string_view name{Name.data, sizeof(Name.data) - 1};
+
+    friend constexpr bool operator==(StrongId lhs, StrongId rhs) noexcept = default;
+};
+
+using NodeId = StrongId<"NodeId", std::uint32_t>;
+using SvfId = StrongId<"SvfId", std::uint32_t>;
+using FieldOffset = StrongId<"FieldOffset", std::int32_t>;
+using CallSiteId = StrongId<"CallSiteId", std::int32_t>;
 
 } // namespace ldc::frontend
 
@@ -88,11 +95,15 @@ public:
     // Interns nodes with an SVF ID. Nodes without an SVF ID are always distinct.
     NodeId addNode(const Node& node);
     std::optional<NodeId> findSvf(SvfId id) const;
-    void addEdge(const Edge& edge);
+    void addEdge(const Edge& edge) { edges_.push_back(edge); }
+
     CallSiteId addCallSite(const CallSite& site);
-    const std::vector<Node>& nodes() const;
-    const std::vector<Edge>& edges() const;
-    const std::vector<CallSite>& callSites() const;
+    const std::vector<Node>& nodes() const { return nodes_; }
+
+    const std::vector<Edge>& edges() const { return edges_; }
+
+    const std::vector<CallSite>& callSites() const { return sites_; }
+
     void printSummary(std::ostream& out) const;
     void dumpDot(std::ostream& out) const;
 

@@ -45,14 +45,6 @@ CallSiteId SimplifiedPAG::addCallSite(const CallSite& site) {
     return CallSiteId{static_cast<std::int32_t>(sites_.size() - 1)};
 }
 
-void SimplifiedPAG::addEdge(const Edge& edge) { edges_.push_back(edge); }
-
-const std::vector<Node>& SimplifiedPAG::nodes() const { return nodes_; }
-
-const std::vector<Edge>& SimplifiedPAG::edges() const { return edges_; }
-
-const std::vector<CallSite>& SimplifiedPAG::callSites() const { return sites_; }
-
 void SimplifiedPAG::printSummary(std::ostream& out) const {
     out << "SimplifiedPAG: " << nodes_.size() << " nodes, " << edges_.size() << " edges, "
         << sites_.size() << " call sites\n";

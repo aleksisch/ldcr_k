@@ -6,7 +6,7 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
 endif()
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -17,7 +17,7 @@ add_library(ldc_frontend
   src/SimplifiedPAG.cpp
   src/SVFEdges.cpp
   src/SVFFrontend.cpp)
-target_compile_features(ldc_frontend PUBLIC cxx_std_17)
+target_compile_features(ldc_frontend PUBLIC cxx_std_20)
 target_include_directories(ldc_frontend PUBLIC include)
 target_link_libraries(ldc_frontend PUBLIC SVF::SvfLLVM SVF::SvfCore)
 
