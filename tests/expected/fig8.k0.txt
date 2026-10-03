@@ -1,0 +1,4 @@
+# Paper Fig. 8: L_DC's dispatch excursion may start at c4 and end at c5 (DP-C1). L_FC (Andersen
+# call graph) is exact here.
+H::m::p -> i1
+H::n::q -> i2

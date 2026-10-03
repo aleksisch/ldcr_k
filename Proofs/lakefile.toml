@@ -1,0 +1,5 @@
+name = "Proofs"
+defaultTargets = ["LdcrEqKcfa"]
+
+[[lean_lib]]
+name = "LdcrEqKcfa"

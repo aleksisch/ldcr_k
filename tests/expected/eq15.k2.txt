@@ -1,0 +1,4 @@
+# Paper Eq. 15 shape: without L_R the dispatch excursion at c8 can leave via c6 and return via c7.
+# k = 1 is not enough even for kCFA: id runs in [c8] for both calls, so k >= 2.
+main::v1 -> k1
+main::v2 -> k2

@@ -34,5 +34,10 @@ resolved calls. The driver accepts LLVM textual IR or bitcode inputs supported
 by SVF. It releases the analysis, SVFIR, and LLVM module after use.
 
 The repository's existing PLAN.md describes the larger research project.
-LDCR graph construction, context-sensitive solvers, proofs, and evaluation are
-reserved for a follow-up change.
+This branch also contains LDCR graph construction, context-sensitive solvers,
+proofs, and evaluation; see PLAN.md, PROOF.md, and RESULTS.md.
+
+Follow-up investigation: adding `tests/fixtures/call_graph.cpp` to the LDCR
+solver test matrix exposes differing context-erased facts with P3Ctx enabled
+at k = 1 and 2, in both kcfa and ldcr modes. The infrastructure call-graph
+check passes; this split leaves the existing solver implementation unchanged.

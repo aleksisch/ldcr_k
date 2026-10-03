@@ -12,7 +12,7 @@ Phase 1 (this plan, in detail): **L_DC_k = L_D ∩ C_k**, where
 L_D ∩ regular = one context-free language, so the problem is decidable and polynomial
 for fixed k.
 
-Phase 2 (later, sketched only): add L_R → **L_DCR_k**.
+Phase 2: add L_R → **L_DCR_k** (§7; implemented, equals kCFA on all programs).
 
 ---
 
@@ -20,12 +20,14 @@ Phase 2 (later, sketched only): add L_R → **L_DCR_k**.
 
 | | What it fixes | What it still gets wrong |
 |---|---|---|
-| L_FC (baseline, = SVF `CFLAlias`, Soot `DemandCSPointsTo`) | fields, contexts | virtual calls: receiver objects cross to the wrong target (paper Fig. 5) |
+| L_FC (baseline, = SVF `CFLAlias`, Soot `DemandCSPointsTo`; SVF's Andersen behaves the same, see §6) | fields, contexts | virtual calls: receiver objects cross to the wrong target (paper Fig. 5) |
 | **L_DC_k** (phase 1) | + receiver → only its own target (Lemma 3), sound parameter passing (Lemma 4) | dispatch excursion may return under the wrong context (paper Eq. 15) |
-| L_DCR_k (phase 2) | + excursion returns the same way (DP-C1, DP-C2) | — (target: equal to kCFA) |
+| L_DCR_k (phase 2) | + excursion returns the same way (DP-C1, DP-C2) | — (measured: equal to kCFA, §7) |
 
 L_DC is sound but not precise (paper Def. 2, Lemma 4). That is fine for phase 1: it already
 beats L_FC on the Fig. 5 case, and the Eq. 15 case becomes the motivating test for phase 2.
+L_DC and L_FC are **incomparable**: on Fig. 8 (DP-C1) L_FC with the Andersen call graph is
+exact and L_DC is not (see §6, M4 findings).
 
 ---
 
@@ -107,8 +109,8 @@ Call graph: the `dispatch[t]` edges that lie on accepted paths, with their conte
 | Language | C++17 |
 | Build | **CMake** + CTest |
 | SVF + LLVM | `svftools/svf:latest` image (SVF 3.4, LLVM 21.1.0); `find_package(SVF CONFIG)` via `SVF_DIR=/home/SVF-tools/SVF/Release-build/lib/cmake/SVF`, `LLVM_DIR` from the same image |
-| Test front end | `clang++` 21 from the image; `-O0 -Xclang -disable-O0-optnone -fno-discard-value-names -g`, then `opt -p=mem2reg` |
-| Dispatch candidates | SVF Andersen call graph (as P3Ctx uses `prePTA`) ∪ SVF CHA |
+| Test front end | `clang++` 21 from the image; `-O0 -Xclang -disable-O0-optnone -fno-discard-value-names -g -flto -fwhole-program-vtables`, then `opt -p=mem2reg` (`cmake/LdcIR.cmake`) |
+| Dispatch candidates | L_D and kCFA: CHA from the vtable slots (as the paper). L_FC: SVF Andersen call graph |
 | Reference oracle | our own kCFA (paper Fig. 1 rules) on LDGraph |
 
 Development happens inside the image: the repo is mounted into a container based on
@@ -122,11 +124,15 @@ ctest --test-dir build
 
 CMake drives test compilation: for each `tests/cpp/*.cpp`, an `add_custom_command` produces the
 `.ll` (clang++ → opt mem2reg), and an `add_test` runs `ldc` on it and compares the result with
-`tests/expected/<name>.json`.
+`tests/expected/<name>.k<k>.txt` (`tests/expect.sh`).
 
-Known pitfall from the first SVF trial (`../cpp-pag/`): SVF's `-v-call-cha` produced **no**
-virtual-call edges on our Fig. 3 port; Andersen's final call graph was correct.
-Use Andersen candidates.
+Known pitfalls with the `svftools/svf` image:
+- SVF's `-v-call-cha` produced **no** virtual-call edges on our Fig. 3 port (`../cpp-pag/`);
+  Andersen's final call graph was correct. Use Andersen candidates.
+- `SVF::SvfLLVM` exports a non-existent include dir (`Release-build/include/SVF`); CMake refuses
+  to generate. The `Dockerfile` creates it.
+- `LLVMModuleSet::preProcessBCs()` (used by SVF's `svf-ex`) writes `<name>.pre.bc`, fails with
+  "Bad file descriptor", and segfaults — `svf-ex` itself crashes. `ldc` follows `wpa` and skips it.
 
 ### 3.1 Repo layout (target)
 
@@ -136,11 +142,14 @@ Dockerfile                 FROM svftools/svf:latest
 include/ldc/               LDGraph.h  Builder.h  Dispatch.h  Solver.h  KCFA.h  Context.h
 src/                       one .cpp per header + main.cpp (the `ldc` tool)
 tests/cpp/                 fig3.cpp  fig5.cpp  eq15.cpp  fields.cpp  static_calls.cpp
-tests/expected/            <name>.json  hand-written expected PTS for queried variables
+tests/expected/            <name>.k<k>.txt  hand-written expected facts for queried variables
 tests/CMakeLists.txt
 ```
 
-`ldc` CLI: `ldc <file.ll> --k=<n> --mode={lfc,ldc,kcfa} [--query=<var>] [--dot=<out>] [--json=<out>]`.
+`ldc` CLI: options go through SVF's parser (`-ldc-*`), so they coexist with SVF's own:
+`ldc [-ldc-dot=<out>] [-ldc-k=<n>] [-ldc-mode={lfc,kcfa,ldc}] [-ldc-src=<cpp>]
+[-ldc-andersen] [-ldc-facts=<out>] <file.ll>`;
+to come: `-ldc-query=<var>`, `-ldc-json=<out>`.
 
 ---
 
@@ -156,7 +165,7 @@ Each milestone ends with a commit and a passing `ctest`.
   - `fig5.cpp` — **two receivers under one context** (`{B1, C1}`); the L_FC failure case.
   - `eq15.cpp` — excursion returns under a different context; the L_DC failure case.
   - `fields.cpp`, `static_calls.cpp` — no dispatch; sanity for fields and contexts.
-- `tests/expected/*.json`: hand-written expected `PTS` for the queried variables.
+- `tests/expected/*.txt`: hand-written expected `PTS` for the queried variables.
 
 **Done when:** `cmake --build` + `ctest` compile all tests to `.ll` and `ldc` runs on each.
 
@@ -182,12 +191,16 @@ Three purposes:
 2. **Oracle**: `KCFA` implements the paper's Fig. 1 rules on LDGraph — the ground truth.
 3. **Reproduce the defect** before fixing it.
 
-**Done when:**
-- `fields.cpp`, `static_calls.cpp`, `fig3.cpp` (k = 1, 2): L_FC_k = kCFA
-  (validates C_k and heap context k−1);
-- `fig5.cpp`: L_FC_k ⊋ kCFA — the Fig. 5 loss is reproduced.
+**Done when** (revised after implementing; status: **done**):
+- `fields.cpp`, `static_calls.cpp` (k = 0, 1, 2), `fig3.cpp` (k = 1), `eq15.cpp` (k = 1, 2):
+  L_FC_k = kCFA (validates C_k and heap context k−1);
+- `fig5.cpp` (k = 0): L_FC_k ⊋ kCFA — the Fig. 5 loss is reproduced;
+- `fig3.cpp` (k = 2): L_FC_k ⊋ kCFA — a second loss, from the context-insensitive call graph
+  (see §6, M3 findings).
 
-### M4 — Dispatch: L_D ∩ C_k  (= L_DC_k)
+CTest runs every test as `<name>.andersen` (M2) and `<name>.<lfc|kcfa>.k<0|1|2>`.
+
+### M4 — Dispatch: L_D ∩ C_k  (= L_DC_k)  — status: **done**
 - `Dispatch`:
   1. find virtual call sites (vptr load → vtable slot load → indirect call);
   2. recover the dynamic type `t` of each heap object (§5);
@@ -199,8 +212,11 @@ Three purposes:
 - `fig5.cpp`: L_DC_k = kCFA (the receiver no longer crosses to the wrong target);
 - `fig3.cpp`: `C::foo` absent; `v ↦ {O1}` under `[c3, c1]`;
 - `eq15.cpp`: L_DC_k ⊋ kCFA (documents what L_R must fix).
+- added `fig8.cpp` (paper Fig. 8, DP-C1): L_DC_k ⊋ kCFA at every k.
 
-### M5 — Evaluation (phase 1)
+CTest adds `<name>.ldc.k<0|1|2>`.
+
+### M5 — Evaluation (phase 1)  — status: **done**, see `RESULTS.md`
 - Table per test: |PTS|, spurious receivers, call edges per context — for
   L_FC_k, L_DC_k, kCFA, SVF Andersen.
 - Small real programs (a few hundred lines of C++ with a class hierarchy).
@@ -215,35 +231,149 @@ Three purposes:
 | Multiple inheritance, `this` adjustment thunks | **out of scope**; tests use single inheritance; detect and report unsupported sites |
 | Function pointers (no receiver) | handled like static calls with Andersen targets (L_FC style); no `dispatch[t]` |
 | Pointer-to-member-function calls | out of scope; report |
-| Object type recovery | `new T(...)` = `operator new` + ctor `T::T`; take `T` from the ctor call on the returned pointer |
+| Object type recovery | the class of the constructor called directly on the allocated pointer (see §6, M3 findings) |
+| Declared type of a virtual call | clang `-fwhole-program-vtables` type tests (see §6, M5 findings) |
 | Stack / global objects with virtual methods | allocation site = `alloca` / global, type from ctor |
-| Arrays, unions, casts | inherit SVF's field model; casts = `assign` |
+| Placement new (pools) | each construction site `new (p) T(...)` is an object of class T (§6, real-program findings) |
+| Polymorphic members | member subobject ⟨O, off⟩ typed from `T::T(this + off)` in the owner's constructor |
+| Arrays, unions, casts | SVF's field model: array elements collapse onto the array's field; pointer arithmetic over struct fields = field `*`; casts = `assign` |
+| Interior pointers (`&o->member`) | field objects ⟨O, off⟩ via `gep[f]` edges (like SVF `GepObjVar`) |
 | Standard library | analyse only user code first; model `operator new`, ignore `std::` bodies |
 
 ---
 
-## 6. Open questions to settle early
+## 6. Findings about SVFIR (settled in M1)
 
-- Which SVF API gives the virtual-call-site structure (vtable slot index, receiver) on LLVM 21?
-  If none works reliably, match the IR pattern ourselves in `Dispatch`.
-- How SVF represents field paths (`Gep` offsets, `vgep`) — defines our `f`.
-- Whether `CallPE`/`RetPE` for virtual calls exist in SVFIR before Andersen, or only after the
-  call graph is resolved (affects the order of `Builder` and `Dispatch`).
+- **Virtual call sites** are recognised by SVF on LLVM 21: `CallICFGNode::isVirtualCall()`,
+  `getVtablePtr()`, `getFunIdxInVtable()`, `getActualParms()`. In IR the dispatch is visible as
+  `r --load[0]--> vtable --load[0]--> fnptr`.
+- **Calls:** `CallPE` is a multi-operand statement (formal ← one actual per call site),
+  `RetPE` is formal return → actual return. Both exist **only for direct calls**. Indirect and
+  virtual call sites have no call/return statements in SVFIR (Andersen connects them only in its
+  own constraint graph), so `Builder` wires them from Andersen's call graph.
+- **Fields:** SVFIR models `p->f = v` as `q = gep p, f; *q = v`. `Builder` folds the gep into the
+  load/store: `v --store[f]--> p`, with `f` = the struct field (array indices are ignored, as
+  in SVF); a direct `*p` is field 0; pointer arithmetic over struct fields is field `*`. A gep
+  result used as a value is an "escaping gep"; in the tests these are the vptr stores in
+  constructors.
+- **Escaping geps** (a gep result used as a value — in C++ mostly the vptr `&vtable[2]` stored by
+  constructors) are modelled as `base --assign--> gep`, dropping the offset. With that, an object's
+  field 0 holds its class's vtable.
+- **Noise** kept in LDGraph for now: vtable / typeinfo globals and function objects.
+
+Findings from M2:
+- On all five tests our k = 0 solver on LDGraph gives **exactly** SVF Andersen's PTS for every
+  variable (compared on base objects).
+- **SVF's Andersen has the paper's Fig. 5 defect.** On `fig5.cpp` it gives `this` of `E::foo` =
+  `{e1, f1}`, the same as our L_FC wiring: it passes the receiver to `this` of every target like an
+  ordinary argument. So SVF Andersen is itself an L_FC-style baseline for M5, not only a sanity check.
+- ~~Type recovery for M4 can read the vtable from field 0.~~ Wrong, see M3 findings.
+
+Findings from M3:
+- **SVF's CHG gives no virtual targets** in this build (`getVFnsFromVtbls` is empty). `Builder`
+  reads the vtables itself: every LLVM global `_ZTV*` with an initializer; the slot for a call
+  site is initializer element `2 + getFunIdxInVtable()` (Itanium address point 2). The SVF object
+  of a vtable is named after the class ("A"), not `_ZTV1A`, so it is found through
+  `LLVMModuleSet::getObjectNode(global)`, not by name.
+- **Field 0 does not give the dynamic type.** Flow-insensitively, field 0 of an `F` object holds
+  both `vtable for F` and `vtable for E`: `F::F` calls `E::E`, which stores its own vptr first.
+  So `DynTypeOf(O)` is set at allocation (as paper [C-New]): the class of the constructor whose
+  `this` receives the allocated pointer directly (base constructors get `this`, not the
+  allocation). `Builder::assignTypes` stores it on the object node and on its `new` edge.
+- **k matters for the examples.** `eq15.cpp` needs k = 2 even for kCFA: at k = 1 both calls of
+  `id` run in `[c8]`. `fig3.cpp` needs k = 2 (heap context of `d1`).
+- **L_FC has a second loss besides Fig. 5**, on `fig3.cpp` at k = 2: the call graph edge
+  `c3 → A::foo` comes from context-insensitive Andersen, so L_FC also enters `A::foo` under
+  `[c3, c2]`, where only `b1` is the receiver; `o2` then reaches `A::foo::v`. kCFA does not.
+  L_D fixes both (the edge is taken only under `new[A]`).
+
+Findings from M4:
+- **Edges** (`Builder::addDispatch`, built for `-ldc-mode=ldc`): `a_i --store[p_i] ⟦ĉ⟧--> r`,
+  `r --assign--> r#c`, `r#c --dispatch[t] ĉ--> this^m'`, `this^m' --load[p_i]--> p_i`,
+  `ret^m' --store[ret]--> this^m'`, `r --load[ret] ⟦č⟧--> x`. The Andersen-wired edges of the
+  same call are built only for `lfc`: each graph holds the edges of one mode. The paper's second,
+  boxed `r --assign ⟦č⟧--> r#c` is the same fact for L_D ∩ C_k; it is left for phase 2.
+- **Synthetic fields** `p_i` / `ret` are separate field ids (the paper's offsets `i` / `0` would
+  clash with real fields: field 0 is the vptr). `load[*]` does not read them.
+- **In inclusion form, L_DC_k is simple**: `dispatch[t]` = [I-VCall] for the receiver; arguments
+  and the result meet through the field `p_i` / `ret` of the heap object ⟨O, h⟩. Its losses vs
+  kCFA are exactly the paper's two: the field is shared by **all call sites** where O is the
+  receiver (Eq. 13, DP-C1: `fig8`) and by **all caller contexts** that map to the same heap
+  context h (Eq. 15, DP-C2: `eq15`, J1 has h = [] while the calls run in [c6] and [c7]).
+- **CHA targets** from vtable slots (no declared-type filter): `fig3` has 3 (`C::foo` included);
+  L_D never reaches `C::foo`, since no object of type C flows to `x`.
+- L_DC_k = kCFA on `static_calls`, `fields`, `fig3`, `fig5` for k = 0, 1, 2.
+
+Findings from M5 (numbers in `RESULTS.md`):
+- **DeclTypeOf(r) is required.** Slot-only CHA sends a call to methods of unrelated
+  hierarchies that share the slot index (`root->handle(e)` → `Copy::run`). SVF's
+  `getFunNameOfVirtualCall()` is empty: it reads "VCallFunName" metadata that only SVF's
+  preprocessing adds — also the reason SVF's CHG found no targets (M3). Instead, IR is compiled
+  with `-fwhole-program-vtables`, and `Builder::declaredClass` reads the class from
+  `llvm.public.type.test(%vtable, !"_ZTS<class>")`; the hierarchy comes from debug info
+  (`DW_TAG_inheritance`).
+- **Memory model fix** (all analyses): escaping geps → `gep[f]` edges and objects ⟨O, h, off⟩
+  in the solver. Dropping the offset merged `bus.history.items` with `bus.root`.
+- **L_FC k = 0 = Andersen holds on the unit tests only**; on the evaluation programs 10–61
+  variables differ (memory-model details). kCFA ⊆ Andersen on all three programs.
+- **Main result:** L_DC ⊇ kCFA always; L_DC removes 23–100 % of L_FC's extra objects; the
+  remaining loss is dominated by DP-C1 in the visitor pattern (`expr`).
+
+Findings from the real program (tinyxml2; numbers in `RESULTS.md`):
+- **Types beyond `new T`.** Nodes are built with placement new in pool memory, and the pools
+  are members of `XMLDocument` (`MemPoolT<N>`, virtual `Alloc` / `Free`). Now: each
+  construction site is its own typed object (`Builder::assignTypes`, `Node::kNoSvfId`);
+  members constructed as `T::T(this + off)` in the owner's constructor type ⟨O, off⟩ for O's
+  class and subclasses, nested (`LDGraph::subobjectType`). Offset 0 is a base class unless T
+  is not a base (first member). `constructorClass` handles class templates (`T<N>::T`).
+- **Offsets are bounded** by SVF's field limit; objects that SVF made field-insensitive
+  (limit 0 after Andersen) are field-insensitive here, and a receiver at offset `*` may have
+  the type of the object or of any polymorphic member (`Solver::receiverTypes`). Without the
+  bound, geps in loops created 40 k+ objects.
+- **Results:** L_DCR_k = kCFA fact by fact at k = 0, 1; L_DC is less precise than L_FC on this
+  program; SVF Andersen's call graph lacks 29 virtual call edges (so L_FC does too); k = 2
+  does not finish in 25 min for any mode.
 
 ---
 
-## 7. Phase 2 — L_R (sketch)
+## 7. Phase 2 — L_R → L_DCR_k  — status: **implemented** (`-ldc-mode=ldcr`)
 
-- Add boxed labels `⟦ĉ⟧` / `⟦č⟧` on the excursion edges (`r → r#c` and `r#c → this`).
-- With the **single shared context** of C_k, the L_R checks become state checks:
-  - DP-C1: excursion closes at the same call site → match `⟦ĉ_c⟧` with `⟦č_c⟧`;
-  - DP-C2: returns "the same way" → the context state after the excursion equals the one before.
-- Target theorem: L_DCR_k with one shared context = kCFA with the same k
-  (heap context k−1). Validate with `KCFA` on all tests, then attempt a proof by
-  simulation in both directions.
+Same LDGraph as L_DC (encoding `D`); only the solver differs. With the **single shared
+context** of C_k, L_R's conditions become checks on solver state:
 
-Naive independent k-limiting of L_C and L_R is expected to **differ** from kCFA
-(heap depth k vs k−1; two unsynchronised truncations). Worth one experiment to confirm.
+| paper (Eq. 16, 17) | solver (`Solver::cellKey`, `Solver::dispatchObject`) |
+|---|---|
+| `a_i --store[p_i] ⟦ĉ_c⟧--> r` opens a dispatch path in context C | the argument goes to O.p_i **of instance (c, C)**, for each O ∈ pts(r, C) |
+| `r --assign ⟦č_c⟧--> r#c --dispatch[t] ĉ_c--> this` closes it | the receiver fact entering `this` in ⌈c :: C⌉_k is tagged (c, C) |
+| DP-C1: closes at the same site c | `this --load[p_i]-->` reads only the instance of the tag: same c … |
+| DP-C2: O pointed to by r under the same context | … and same C |
+| returns (mirror) | `ret --store[ret]--> this` writes the tag's instance; `r --load[ret] ⟦č_c⟧--> x` in C reads (c, C) |
+
+Tags live only in `this` of the dispatched method; every other edge drops them.
+
+**Result:** L_DCR_k = kCFA **fact by fact** — the same (object, heap context) set for every
+(variable, context) — on all unit tests and all evaluation programs for k = 0…4
+(CTest `<program>.ldcr-same.k<k>` compares the `-ldc-facts` files). A negative control
+(comparing L_DC instead, k = 2) reports 2 / 10 / 20 619 differing facts on `fig8` / `eq15` /
+`expr`.
+
+**Proof sketch** (inclusion form, induction on derivations; all other rules are shared; the full
+proof, with the exact rules of both modes, is in `PROOF.md`):
+- kCFA ⊆ L_DCR: an [I-VCall] firing for (c, C, O ∈ pts(r, C), m′ = dispatch(c, type O)) adds
+  O to this^m′, pts(a_i, C) to p_i^m′ and ret^m′ to x in C, with callee context ⌈c :: C⌉_k.
+  L_DCR derives the same: dispatch adds O^(c,C) to this^m′; the store puts pts(a_i, C)
+  into O.p_i@(c, C); the load moves it to p_i^m′; the return goes through O.ret@(c, C).
+- L_DCR ⊆ kCFA: O.p_i@(c, C) is written only from pts(a_i, C) with O ∈ pts(r, C), and read only
+  in m′ through the tag (c, C), which exists only if dispatch fired for O at (c, C) — exactly
+  the premise of [I-VCall]. Returns are symmetric. Receivers of unknown type are dropped by both.
+
+So in inclusion form the equality is close to *by construction*. The open part — the
+research question — is the CFL side: that this solver computes exactly the paths accepted by
+L_D ∩ C_k ∩ L_R_k with the shared-context regularisation (path ↔ derivation), and a
+demand-driven (single-query) solver for it, which is where CFL pays off over kCFA (§8).
+
+Not done: the planned experiment with **independent** k-limiting of L_C and L_R (expected to
+differ from kCFA).
 
 ---
 
@@ -251,6 +381,8 @@ Naive independent k-limiting of L_C and L_R is expected to **differ** from kCFA
 
 - Demand-driven solver (single query from a variable; memoisation; budget) — the actual value
   over kCFA.
+- Scalability of the exhaustive solvers: k = 2 on tinyxml2 (cycle elimination, context-
+  insensitive pool objects, selective context sensitivity as in P3Ctx).
 - Clients: devirtualisation (monomorphic call sites), cast checks, may-alias queries.
 - Baselines: SVF `CFLAlias` (C++), Soot `soot.jimple.spark.ondemand.DemandCSPointsTo` (Java,
   available in the `p3ctx` image).

@@ -1,0 +1,6 @@
+# C::foo is a CHA target of c3 but no C object reaches x, so its `this` stays empty. k = 1 is not
+# enough: d1 has heap context k-1 = 0, so d1.f merges o1 and o2. At k = 2, L_FC takes the context-
+# insensitive Andersen call graph edge c3 -> A::foo also under [c3, c2] (b1 flows there), so o2
+# reaches v.
+A::foo::v -> o1
+A::foo::v -> o2

@@ -1,0 +1,8 @@
+# Construction sites and member subobjects (also of a class-template type). At k = 0 both Leaf
+# objects meet in Leaf::self; k = 1 separates them. Without them the Leaf built in pool memory and
+# the Pool member have no dynamic type, and kCFA / L_DCR drop them at virtual calls. SVF Andersen
+# resolves neither virtual call, so L_FC (wired from its call graph) finds nothing: unsound. Our k
+# = 0 L_FC therefore differs from Andersen (main::vtable), hence no .andersen test.
+# andersen: false
+main::s -> leaf
+main::u -> tleaf

@@ -1,0 +1,4 @@
+[submodule "third_party/CFPQ_PyAlgo"]
+	path = third_party/CFPQ_PyAlgo
+	url = https://github.com/FormalLanguageConstrainedPathQuerying/CFPQ_PyAlgo
+	branch = murav/optimize-matrix

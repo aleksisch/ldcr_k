@@ -1,0 +1,3 @@
+# Paper Fig. 5: one context, two receiver objects. L_FC lets each object reach both targets.
+E::foo::this -> e1
+F::foo::this -> f1
