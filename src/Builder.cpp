@@ -1,5 +1,6 @@
 #include "ldc/Builder.h"
 #include "SVFDetails.h"
+#include "GEPFolding.h"
 #include "ldc/SVFFrontend.h"
 #include <stdexcept>
 
@@ -336,7 +337,7 @@ public:
     LDGraph run() {
         const auto statements = frontend::detail::statementEdges(pag_);
         stats_.variantGeps = statements.variantGeps;
-        add(statements.edges);
+        add(frontend::detail::foldGeps(pag_, statements.edges));
         add(frontend::detail::indirectCalls(pag_, callGraph_, mode_ == Mode::Lfc));
 
         const std::vector<VTable> vtables = collectVTables(pag_);

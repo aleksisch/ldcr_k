@@ -26,6 +26,7 @@ add_executable(ldc
   src/main.cpp
   src/LDGraph.cpp
   src/Builder.cpp
+  src/GEPFolding.cpp
   src/Solver.cpp
   src/P3Ctx.cpp)
 target_include_directories(ldc PRIVATE include)

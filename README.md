@@ -201,3 +201,8 @@ Follow-up investigation: adding `tests/fixtures/call_graph.cpp` to the LDCR
 solver test matrix exposes differing context-erased facts with P3Ctx enabled
 at k = 1 and 2, in both kcfa and ldcr modes. The infrastructure call-graph
 check passes; this split leaves the existing solver implementation unchanged.
+
+The research builder applies a separate `foldGeps` pass to the extracted edges.
+It folds GEP chains into load/store field offsets and retains explicit GEPs when
+their address values are copied, stored, passed, returned, or merged.
+The common frontend and `--program-dot` export keep explicit GEPs.
