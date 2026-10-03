@@ -13,9 +13,11 @@ namespace {
 void require(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
 }
+
 bool startsWith(const std::string& text, const std::string& prefix) {
     return text.rfind(prefix, 0) == 0;
 }
+
 bool hasEdge(const SimplifiedPAG& graph, NodeId from, NodeId to, CallDir dir, CallSiteId site) {
     for (const auto& edge : graph.edges())
         if (edge.src == from && edge.dst == to && edge.label == Label::Assign && edge.dir == dir &&
@@ -23,6 +25,7 @@ bool hasEdge(const SimplifiedPAG& graph, NodeId from, NodeId to, CallDir dir, Ca
             return true;
     return false;
 }
+
 void check(const SimplifiedPAG& graph, bool debug) {
     bool allocation = false, store = false, load = false, gep = false, merge = false;
     bool sourceName = false, location = false, demangled = false;
@@ -86,6 +89,7 @@ void check(const SimplifiedPAG& graph, bool debug) {
                 dot.str().find("enter@") != std::string::npos,
             "incomplete DOT export");
 }
+
 void checkManualGraph() {
     SimplifiedPAG graph;
     Node object;
@@ -113,6 +117,7 @@ void checkManualGraph() {
             "zero IDs/offsets or wildcard fields were lost");
     require(dot.str().find("a\\\"b\\\\c\\nd") != std::string::npos, "DOT escaping failed");
 }
+
 } // namespace
 int main(int argc, char** argv) {
     const auto inputs = OptionBase::parseOptions(argc, argv, "frontend test", "<input.ll>");

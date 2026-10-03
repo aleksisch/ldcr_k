@@ -19,6 +19,7 @@ std::string escapeDot(const std::string& text) {
     }
     return out;
 }
+
 } // namespace
 
 NodeId SimplifiedPAG::addNode(const Node& node) {
@@ -29,18 +30,25 @@ NodeId SimplifiedPAG::addNode(const Node& node) {
     if (node.svfId) bySvf_.emplace(*node.svfId, id);
     return id;
 }
+
 std::optional<NodeId> SimplifiedPAG::findSvf(SvfId id) const {
     auto it = bySvf_.find(id);
     return it == bySvf_.end() ? std::nullopt : std::optional<NodeId>(it->second);
 }
+
 CallSiteId SimplifiedPAG::addCallSite(const CallSite& site) {
     sites_.push_back(site);
     return static_cast<CallSiteId>(sites_.size() - 1);
 }
+
 void SimplifiedPAG::addEdge(const Edge& edge) { edges_.push_back(edge); }
+
 const std::vector<Node>& SimplifiedPAG::nodes() const { return nodes_; }
+
 const std::vector<Edge>& SimplifiedPAG::edges() const { return edges_; }
+
 const std::vector<CallSite>& SimplifiedPAG::callSites() const { return sites_; }
+
 void SimplifiedPAG::printSummary(std::ostream& out) const {
     out << "SimplifiedPAG: " << nodes_.size() << " nodes, " << edges_.size() << " edges, "
         << sites_.size() << " call sites\n";
@@ -49,6 +57,7 @@ void SimplifiedPAG::printSummary(std::ostream& out) const {
     for (std::size_t i = 0; i < counts.size(); ++i)
         out << "  " << labels[i] << ": " << counts[i] << "\n";
 }
+
 void SimplifiedPAG::dumpDot(std::ostream& out) const {
     out << "digraph SimplifiedPAG {\n  rankdir=LR;\n";
     for (NodeId id = 0; id < nodes_.size(); ++id) {
@@ -82,4 +91,5 @@ void SimplifiedPAG::dumpDot(std::ostream& out) const {
     }
     out << "}\n";
 }
+
 } // namespace ldc::frontend
