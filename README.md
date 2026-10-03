@@ -113,8 +113,10 @@ build-native/ldc --program-dot program.dot build-native/tests/pointer_flow.ll
 argument and return edges carry `enter@site` / `exit@site` labels. Separate
 call-site notes list resolved targets, including calls without pointer flow.
 
-The frontend folds loads/stores through GEPs onto their base pointer and flattened
-struct offset. Escaping field addresses retain explicit `gep` edges. Phi/select
+The frontend keeps each GEP as an explicit edge with its immediate base and
+result. Loads/stores keep their original endpoints and use offset zero; field
+offsets remain on GEP edges. Folding these edges is a separate analysis-specific
+transformation. Phi/select
 inputs become assignment edges. Indirect and virtual call connections come from
 Andersen's resolved call graph; unresolved call sites remain present with no
 targets. This does not perform a new points-to analysis or infer missing targets.
