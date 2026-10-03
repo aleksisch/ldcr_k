@@ -16,7 +16,7 @@ target_compile_features(ldc_frontend PUBLIC cxx_std_17)
 target_include_directories(ldc_frontend PUBLIC include)
 target_link_libraries(ldc_frontend PUBLIC SVF::SvfLLVM SVF::SvfCore)
 
-add_executable(ldc src/main.cpp)
+add_executable(ldc src/main.cpp src/CommandLine.cpp)
 target_link_libraries(ldc PRIVATE ldc_frontend)
 
 include(cmake/LdcIR.cmake)
