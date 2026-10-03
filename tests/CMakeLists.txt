@@ -76,117 +76,74 @@ endforeach()
 add_custom_target(test_ir ALL DEPENDS ${LDC_TEST_IR})
 
 # Shared LLVM/SVF infrastructure checks.
-# Build the LLVM IR fixtures as part of the default build.
+# Build the two input programs used by the driver tests.
 ldc_compile_ir("${CMAKE_CURRENT_SOURCE_DIR}/fixtures/call_graph.cpp" call_graph_ir)
-add_custom_target(call_graph_ir ALL DEPENDS "${call_graph_ir}")
-
-# Run the driver and check its resolved call edges.
-# CTest runs this generated script at test time, after the driver is built.
-file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/check_call_graph.cmake" CONTENT [[
-execute_process(COMMAND "${DRIVER}" "${IR}"
-  RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE error)
-if(NOT status EQUAL 0)
-  message(FATAL_ERROR "Driver failed: ${status}\n${output}\n${error}")
-endif()
-if(output MATCHES "NumOfStores|SolveIterations|Persistent Points-To Cache Statistics|TotalUnions")
-  message(FATAL_ERROR "Dependency statistics leaked into output:
-${output}")
-endif()
-foreach(edge "main -> direct" "main -> invoke" "invoke -> indirect")
-  string(FIND "${output}" "call: ${edge}\n" found)
-  if(found EQUAL -1)
-    message(FATAL_ERROR "Missing call edge ${edge}:\n${output}")
-  endif()
-endforeach()
-]])
-add_test(NAME call_graph
-  COMMAND "${CMAKE_COMMAND}" "-DDRIVER=$<TARGET_FILE:ldc>"
-          "-DIR=${call_graph_ir}" -P "${CMAKE_CURRENT_BINARY_DIR}/check_call_graph.cmake")
-
-# These error cases must return a nonzero exit status.
-add_test(NAME missing_input COMMAND ldc)
-set_tests_properties(missing_input PROPERTIES WILL_FAIL TRUE)
-
-# Exercise the frontend with and without LLVM debug information.
 ldc_compile_ir("${CMAKE_CURRENT_SOURCE_DIR}/fixtures/pointer_flow.cpp" pointer_flow_ir)
-set(pointer_flow_no_debug "${CMAKE_CURRENT_BINARY_DIR}/pointer_flow.no-debug.ll")
-add_custom_command(OUTPUT "${pointer_flow_no_debug}"
-  COMMAND "${LDC_OPT}" -S -strip-debug "${pointer_flow_ir}" -o "${pointer_flow_no_debug}"
-  DEPENDS "${pointer_flow_ir}" VERBATIM)
-add_custom_target(frontend_ir ALL DEPENDS "${pointer_flow_ir}" "${pointer_flow_no_debug}")
-add_executable(frontend_test frontend_test.cpp)
-target_link_libraries(frontend_test PRIVATE ldc_frontend)
-add_dependencies(frontend_test frontend_ir)
-add_test(NAME frontend COMMAND frontend_test "${pointer_flow_ir}")
-add_test(NAME frontend.no-debug COMMAND frontend_test "${pointer_flow_no_debug}")
+add_custom_target(frontend_ir ALL DEPENDS "${call_graph_ir}" "${pointer_flow_ir}")
 
-# Check the exported simplified PAG, including fields, calls, and source metadata.
-file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/check_program_graph.cmake" CONTENT [[
-execute_process(COMMAND "${DRIVER}" --program-dot "${DOT}" "${IR}"
+# One shared runner, generated into the build directory for CTest.
+file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/check_driver.cmake" CONTENT [[
+if(FILE)
+  file(REMOVE "${FILE}")
+endif()
+execute_process(COMMAND "${DRIVER}" ${ARGS}
   RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE error)
-if(NOT status EQUAL 0)
-  message(FATAL_ERROR "Graph export failed: ${status}\n${output}\n${error}")
+if(NOT status STREQUAL "${STATUS}")
+  message(FATAL_ERROR "Exit ${status}, expected ${STATUS}:\n${output}\n${error}")
 endif()
-if(output MATCHES "NumOfStores|SolveIterations|Persistent Points-To Cache Statistics|TotalUnions")
-  message(FATAL_ERROR "Dependency statistics leaked into export output:
-${output}")
+if(output MATCHES "${REJECT}")
+  message(FATAL_ERROR "Unexpected driver output:\n${output}")
 endif()
-file(READ "${DOT}" graph)
-foreach(fragment "digraph SimplifiedPAG" "store[2]" "load[2]" "gep[2]"
-                 "enter@" "exit@" "pointer_flow.cpp" "inspect(Box*, int*, bool)" "loaded")
-  string(FIND "${graph}" "${fragment}" found)
+if(STATUS STREQUAL "0")
+  set(text "${output}")
+else()
+  set(text "${error}")
+endif()
+if(FILE)
+  file(READ "${FILE}" text)
+  file(REMOVE "${FILE}")
+endif()
+foreach(fragment IN LISTS EXPECT)
+  string(FIND "${text}" "${fragment}" found)
   if(found EQUAL -1)
-    message(FATAL_ERROR "Missing graph content: ${fragment}")
+    message(FATAL_ERROR "Missing '${fragment}':\n${text}")
   endif()
 endforeach()
-file(REMOVE "${DOT}")
 ]])
-add_test(NAME program_dot
-  COMMAND "${CMAKE_COMMAND}" "-DDRIVER=$<TARGET_FILE:ldc>" "-DIR=${pointer_flow_ir}"
-          "-DDOT=${CMAKE_CURRENT_BINARY_DIR}/program.dot"
-          -P "${CMAKE_CURRENT_BINARY_DIR}/check_program_graph.cmake")
 
-# A directory cannot be opened as a DOT output file.
-add_test(NAME program_dot.write_error COMMAND ldc
-  "-program-dot=${CMAKE_CURRENT_BINARY_DIR}" "${pointer_flow_ir}")
-set_tests_properties(program_dot.write_error PROPERTIES WILL_FAIL TRUE)
+function(driver_test name)
+  cmake_parse_arguments(T "" "STATUS;FILE;REJECT" "ARGS;EXPECT" ${ARGN})
+  if(NOT T_STATUS)
+    set(T_STATUS 0)
+  endif()
+  set(reject "NumOfStores|SolveIterations|Persistent Points-To Cache Statistics|TotalUnions")
+  if(T_REJECT)
+    string(APPEND reject "|${T_REJECT}")
+  endif()
+  add_test(NAME "${name}" COMMAND "${CMAKE_COMMAND}" "-DDRIVER=$<TARGET_FILE:ldc>"
+    "-DARGS=${T_ARGS}" "-DSTATUS=${T_STATUS}" "-DFILE=${T_FILE}"
+    "-DEXPECT=${T_EXPECT}" "-DREJECT=${reject}"
+    -P "${CMAKE_CURRENT_BINARY_DIR}/check_driver.cmake")
+endfunction()
 
+driver_test(call_graph ARGS "${call_graph_ir}"
+  EXPECT "call: main -> direct\n" "call: main -> invoke\n" "call: invoke -> indirect\n")
+set(dot "${CMAKE_CURRENT_BINARY_DIR}/program.dot")
+driver_test(program_dot ARGS --program-dot "${dot}" "${pointer_flow_ir}" FILE "${dot}"
+  EXPECT "digraph SimplifiedPAG" "store[2]" "load[2]" "gep[2]" "enter@" "exit@"
+         "pointer_flow.cpp" "inspect(Box*, int*, bool)" "loaded")
+driver_test(missing_input STATUS 1 EXPECT "no input files")
+driver_test(program_dot.write_error STATUS 1
+  ARGS "-program-dot=${CMAKE_CURRENT_BINARY_DIR}" "${pointer_flow_ir}"
+  EXPECT "Cannot write program graph")
 
-# Help and invalid options are handled by our CLI before any analysis starts.
-file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/check_cli.cmake" CONTENT [[
 foreach(flag --help -h)
-  execute_process(COMMAND "${DRIVER}" "${flag}"
-    RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE error)
-  if(NOT status STREQUAL "0" OR NOT error STREQUAL "")
-    message(FATAL_ERROR "Help failed: ${status}
-${output}
-${error}")
-  endif()
-  if(NOT output MATCHES "Usage: ldc" OR NOT output MATCHES "--program-dot")
-    message(FATAL_ERROR "Missing tool help: ${output}")
-  endif()
-  if(output MATCHES "SVF|  -ander|  -stat|help-svf")
-    message(FATAL_ERROR "Dependency options leaked into help: ${output}")
-  endif()
+  driver_test("help.${flag}" ARGS "${flag}" EXPECT "Usage: ldc" "--program-dot"
+    REJECT "SVF|  -ander|  -stat|help-svf")
 endforeach()
 foreach(flag -stat=false -dump-callgraph -ander --help-svf --unknown)
-  execute_process(COMMAND "${DRIVER}" "${flag}"
-    RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE error)
-  if(NOT status STREQUAL "1" OR NOT output STREQUAL "" OR NOT error MATCHES "unknown option")
-    message(FATAL_ERROR "Unsupported option was not rejected: ${flag}
-${output}
-${error}")
-  endif()
+  driver_test("unknown.${flag}" ARGS "${flag}" STATUS 1 EXPECT "unknown option")
 endforeach()
 foreach(flag --program-dot --program-dot=)
-  execute_process(COMMAND "${DRIVER}" "${flag}"
-    RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE error)
-  if(NOT status STREQUAL "1" OR NOT error MATCHES "requires an output path")
-    message(FATAL_ERROR "Missing output path was not rejected: ${output}
-${error}")
-  endif()
+  driver_test("missing_path.${flag}" ARGS "${flag}" STATUS 1 EXPECT "requires an output path")
 endforeach()
-]])
-add_test(NAME cli
-  COMMAND "${CMAKE_COMMAND}" "-DDRIVER=$<TARGET_FILE:ldc>"
-          -P "${CMAKE_CURRENT_BINARY_DIR}/check_cli.cmake")

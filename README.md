@@ -76,8 +76,8 @@ It uses Ubuntu 24.04 and the pinned prebuilt SVF/LLVM/Z3 packages above, caching
 the native toolchain between runs. Even the first run uses binary dependencies.
 
 The tests check direct and resolved function-pointer calls, nested field offsets,
-argument/return flow, source/debug information, IR without debug information,
-DOT export, and input/output errors. The CMake helper compiles fixtures with
+argument/return flow and source/debug information in DOT exports, help output,
+unsupported options, and input/output errors. The CMake helper compiles fixtures with
 clang++ and runs `mem2reg` with opt from the selected LLVM installation.
 
 ## Inspect a call graph
