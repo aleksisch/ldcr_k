@@ -61,6 +61,7 @@ public:
                 for (const auto* site : edge->getIndirectCalls()) targets_[site].insert(callee);
             }
     }
+
     SimplifiedPAG run() {
         const auto statements = statementEdges(pag_);
         stats_.variantGeps = statements.variantGeps;
@@ -95,9 +96,11 @@ private:
         info.line = sourceLine(info.sourceLocation);
         return graph_.addNode(info);
     }
+
     std::optional<NodeId> optionalNode(const SVFVar* value) {
         return relevant(value) ? std::optional<NodeId>(node(value)) : std::nullopt;
     }
+
     CallSiteId callSite(const CallICFGNode* site) {
         if (auto it = sites_.find(site); it != sites_.end()) return it->second;
         CallSite info;
@@ -127,6 +130,7 @@ private:
         sites_.emplace(site, id);
         return id;
     }
+
     void add(const SvfEdges& edges) {
         for (const auto& edge : edges) {
             const auto site =
@@ -140,6 +144,7 @@ private:
             graph_.addEdge({src, dst, edge.label, edge.field, site, edge.dir});
         }
     }
+
     SVFIR& pag_;
     const CallGraph& calls_;
     std::unordered_map<const CallICFGNode*, std::set<const FunObjVar*>> targets_;
@@ -154,4 +159,5 @@ SimplifiedPAG buildSimplifiedPAG(SVFIR& pag, const CallGraph& calls, BuildStats&
     stats = {};
     return Builder(pag, calls, stats).run();
 }
+
 } // namespace ldc::frontend

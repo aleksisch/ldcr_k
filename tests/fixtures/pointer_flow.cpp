@@ -3,9 +3,13 @@ struct Box { int* lead; Inner nested; };
 int globalValue;
 
 int* identity(int* value) { return value; }
+
 int* invoke(int* (*function)(int*), int* value) { return function(value); }
+
 int* dereference(int** address) { return *address; }
+
 int* throughField(Box* box, int* (*reader)(int**)) { return reader(&box->nested.tail); }
+
 void noArguments() {}
 void unresolved(void (*function)()) { function(); }
 
