@@ -1,4 +1,4 @@
-#include "ldc/SVFEdges.h"
+#include "SVFDetails.h"
 #include "Graphs/CallGraph.h"
 #include "Graphs/ICFGNode.h"
 #include "SVFIR/SVFIR.h"
@@ -9,7 +9,7 @@
 #include <utility>
 
 using namespace SVF;
-namespace ldc::frontend {
+namespace ldc::frontend::detail {
 static bool isIntrinsicName(const std::string& name) { return name.rfind("llvm.", 0) == 0; }
 
 /// Variables and objects that take part in pointer flow. Constants, dummies,
@@ -121,12 +121,12 @@ SvfEdges statementEdges(SVFIR& pag, const Geps& geps, const std::unordered_set<S
     for (const SVFStmt* s : stmts(SVFStmt::Call)) { // formal ← one actual per call site
         const auto* call = SVFUtil::cast<CallPE>(s);
         for (u32_t i = 0; i < call->getOpVarNum(); ++i)
-            edges.push_back({call->getOpVar(i), call->getRes(), Label::Assign, kNoField,
+            edges.push_back({call->getOpVar(i), call->getRes(), Label::Assign, std::nullopt,
                              call->getOpCallICFGNode(i), CallDir::Enter});
     }
     for (const SVFStmt* s : stmts(SVFStmt::Ret)) { // formal return → actual return
         const auto* ret = SVFUtil::cast<RetPE>(s);
-        edges.push_back({ret->getRHSVar(), ret->getLHSVar(), Label::Assign, kNoField,
+        edges.push_back({ret->getRHSVar(), ret->getLHSVar(), Label::Assign, std::nullopt,
                          ret->getCallInst(), CallDir::Exit});
     }
     return edges;
@@ -148,14 +148,14 @@ IndirectCalls indirectCalls(SVFIR& pag, const CallGraph& callGraph, bool virtual
                     const auto& formals = pag.getFunArgsList(callee);
                     const auto& actuals = cs->getActualParms();
                     for (std::size_t i = 0; i < formals.size() && i < actuals.size(); ++i)
-                        calls.edges.push_back(
-                            {actuals[i], formals[i], Label::Assign, kNoField, cs, CallDir::Enter});
+                        calls.edges.push_back({actuals[i], formals[i], Label::Assign, std::nullopt,
+                                               cs, CallDir::Enter});
                 }
                 auto ret = pag.getFunRets().find(callee);
                 const SVFVar* actualRet = cs->getRetICFGNode()->getActualRet();
                 if (ret != pag.getFunRets().end() && actualRet != nullptr)
                     calls.edges.push_back(
-                        {ret->second, actualRet, Label::Assign, kNoField, cs, CallDir::Exit});
+                        {ret->second, actualRet, Label::Assign, std::nullopt, cs, CallDir::Exit});
             }
         }
     return calls;
@@ -166,4 +166,4 @@ StatementEdges statementEdges(SVFIR& pag) {
     return {statementEdges(pag, geps, findEscapingGeps(pag, geps)), geps.variant};
 }
 
-} // namespace ldc::frontend
+} // namespace ldc::frontend::detail

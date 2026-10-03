@@ -1,5 +1,5 @@
 #include "ldc/SVFFrontend.h"
-#include "ldc/SVFEdges.h"
+#include "SVFDetails.h"
 #include "Graphs/CallGraph.h"
 #include "SVF-LLVM/LLVMModule.h"
 #include "SVFIR/SVFIR.h"
@@ -13,6 +13,7 @@
 
 using namespace SVF;
 namespace ldc::frontend {
+namespace detail {
 
 int sourceLine(const std::string& location) {
     static const std::regex lineRe(R"re("?ln"?\s*:\s*(\d+))re");
@@ -45,7 +46,10 @@ std::unordered_map<SvfId, DebugName> debugNames() {
     return names;
 }
 
+} // namespace detail
+
 namespace {
+using namespace detail;
 class Builder {
 public:
     Builder(SVFIR& pag, const CallGraph& calls, BuildStats& stats)
@@ -82,10 +86,10 @@ private:
         info.kind = SVFUtil::isa<ObjVar>(value) ? NodeKind::Obj : NodeKind::Var;
         info.name = value->getName();
         if (info.name.empty())
-            info.name = (info.kind == NodeKind::Obj ? "o" : "v") + std::to_string(info.svfId);
+            info.name = (info.kind == NodeKind::Obj ? "o" : "v") + std::to_string(*info.svfId);
         if (const auto* function = value->getFunction())
             info.function = llvm::demangle(function->getName());
-        if (auto it = names_.find(info.svfId); it != names_.end())
+        if (auto it = names_.find(*info.svfId); it != names_.end())
             info.sourceName = it->second.name;
         info.sourceLocation = value->getSourceLoc();
         info.line = sourceLine(info.sourceLocation);
@@ -125,7 +129,8 @@ private:
     }
     void add(const SvfEdges& edges) {
         for (const auto& edge : edges) {
-            const auto site = edge.site ? callSite(edge.site) : kNoCallSite;
+            const auto site =
+                edge.site ? std::optional<CallSiteId>(callSite(edge.site)) : std::nullopt;
             if (!relevant(edge.src) || !relevant(edge.dst)) {
                 ++stats_.skippedEdges;
                 continue;

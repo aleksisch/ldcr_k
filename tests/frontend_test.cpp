@@ -4,6 +4,7 @@
 #include "Util/CommandLine.h"
 #include "WPA/Andersen.h"
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 
@@ -27,7 +28,7 @@ void check(const ProgramGraph& graph, bool debug) {
     bool sourceName = false, location = false, demangled = false;
     for (NodeId id = 0; id < graph.nodes().size(); ++id) {
         const auto& node = graph.nodes()[id];
-        require(graph.findSvf(node.svfId) == id, "SVF ID mapping lost");
+        require(node.svfId && graph.findSvf(*node.svfId) == id, "SVF ID mapping lost");
         require(!node.name.empty(), "missing IR/fallback name");
         sourceName |= node.sourceName == "loaded";
         location |=
@@ -92,10 +93,24 @@ void checkManualGraph() {
     object.name = "a\"b\\c\nd";
     const auto from = graph.addNode(object);
     const auto to = graph.addNode(Node{});
-    require(from != to && !graph.findSvf(kNoSvfId), "synthetic nodes were incorrectly interned");
+    require(from != to && !graph.nodes()[from].svfId && !graph.nodes()[to].svfId,
+            "synthetic nodes were incorrectly interned");
     graph.addEdge({from, to, Label::New});
+    require(!graph.edges().back().field && !graph.edges().back().callSite,
+            "absent edge metadata was not preserved");
+    Node identified;
+    identified.svfId = std::numeric_limits<SvfId>::max();
+    const auto id = graph.addNode(identified);
+    require(graph.addNode(identified) == id && graph.findSvf(*identified.svfId) == id,
+            "maximum SVF ID was treated as missing");
+    const auto site = graph.addCallSite(CallSite{});
+    graph.addEdge({from, to, Label::Gep, 0, site, CallDir::Enter});
+    graph.addEdge({from, to, Label::Gep, kAnyField});
     std::ostringstream dot;
     graph.dumpDot(dot);
+    require(dot.str().find("gep[0] enter@0") != std::string::npos &&
+                dot.str().find("gep[*]") != std::string::npos,
+            "zero IDs/offsets or wildcard fields were lost");
     require(dot.str().find("a\\\"b\\\\c\\nd") != std::string::npos, "DOT escaping failed");
 }
 } // namespace

@@ -13,10 +13,8 @@ using NodeId = std::uint32_t;
 using SvfId = std::uint32_t;
 using FieldId = std::int32_t;
 using CallSiteId = std::int32_t;
-inline constexpr SvfId kNoSvfId = 0xffffffffu;
-inline constexpr FieldId kNoField = -1;
+// Unknown field offset; an empty optional means the edge has no field.
 inline constexpr FieldId kAnyField = -2;
-inline constexpr CallSiteId kNoCallSite = -1;
 
 enum class NodeKind { Var, Obj };
 enum class Label { New, Assign, Store, Load, Gep };
@@ -24,7 +22,7 @@ enum class CallDir { None, Enter, Exit };
 
 struct Node {
     NodeKind kind = NodeKind::Var;
-    SvfId svfId = kNoSvfId;
+    std::optional<SvfId> svfId;
     std::string name;           // IR/SVF name, or a generated fallback
     std::string function;       // demangled enclosing function
     std::string sourceName;     // variable name recovered from LLVM debug records, if available
@@ -36,8 +34,8 @@ struct Edge {
     NodeId src;
     NodeId dst;
     Label label;
-    FieldId field = kNoField; // flattened struct offset; arrays follow SVF's abstraction
-    CallSiteId callSite = kNoCallSite;
+    std::optional<FieldId> field; // flattened struct offset; arrays follow SVF's abstraction
+    std::optional<CallSiteId> callSite;
     CallDir dir = CallDir::None;
 };
 
@@ -48,7 +46,7 @@ struct CallTarget {
 };
 
 struct CallSite {
-    SvfId svfId = kNoSvfId; // call ICFG node, not a PAG node
+    std::optional<SvfId> svfId; // call ICFG node, not a PAG node
     std::string caller;
     std::string sourceLocation;
     int line = 0;
@@ -64,14 +62,14 @@ struct CallSite {
 // Clients can also construct a graph directly, without running SVF.
 class ProgramGraph {
 public:
-    // Interns nodes with an SVF ID. Nodes with kNoSvfId are always distinct.
+    // Interns nodes with an SVF ID. Nodes without an SVF ID are always distinct.
     NodeId addNode(const Node& node);
     std::optional<NodeId> findSvf(SvfId id) const;
-    void addEdge(const Edge& edge) { edges_.push_back(edge); }
+    void addEdge(const Edge& edge);
     CallSiteId addCallSite(const CallSite& site);
-    const std::vector<Node>& nodes() const { return nodes_; }
-    const std::vector<Edge>& edges() const { return edges_; }
-    const std::vector<CallSite>& callSites() const { return sites_; }
+    const std::vector<Node>& nodes() const;
+    const std::vector<Edge>& edges() const;
+    const std::vector<CallSite>& callSites() const;
     void printSummary(std::ostream& out) const;
     void dumpDot(std::ostream& out) const;
 
