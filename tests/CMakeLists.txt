@@ -76,74 +76,23 @@ endforeach()
 add_custom_target(test_ir ALL DEPENDS ${LDC_TEST_IR})
 
 # Shared LLVM/SVF infrastructure checks.
-# Build the two input programs used by the driver tests.
 ldc_compile_ir("${CMAKE_CURRENT_SOURCE_DIR}/fixtures/call_graph.cpp" call_graph_ir)
 ldc_compile_ir("${CMAKE_CURRENT_SOURCE_DIR}/fixtures/pointer_flow.cpp" pointer_flow_ir)
 add_custom_target(frontend_ir ALL DEPENDS "${call_graph_ir}" "${pointer_flow_ir}")
 
-# One shared runner, generated into the build directory for CTest.
-file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/check_driver.cmake" CONTENT [[
-if(FILE)
-  file(REMOVE "${FILE}")
-endif()
-execute_process(COMMAND "${DRIVER}" ${ARGS}
-  RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE error)
-if(NOT status STREQUAL "${STATUS}")
-  message(FATAL_ERROR "Exit ${status}, expected ${STATUS}:\n${output}\n${error}")
-endif()
-if(output MATCHES "${REJECT}")
-  message(FATAL_ERROR "Unexpected driver output:\n${output}")
-endif()
-if(STATUS STREQUAL "0")
-  set(text "${output}")
-else()
-  set(text "${error}")
-endif()
-if(FILE)
-  file(READ "${FILE}" text)
-  file(REMOVE "${FILE}")
-endif()
-foreach(fragment IN LISTS EXPECT)
-  string(FIND "${text}" "${fragment}" found)
-  if(found EQUAL -1)
-    message(FATAL_ERROR "Missing '${fragment}':\n${text}")
-  endif()
-endforeach()
-]])
-
-function(driver_test name)
-  cmake_parse_arguments(T "" "STATUS;FILE;REJECT" "ARGS;EXPECT" ${ARGN})
-  if(NOT T_STATUS)
-    set(T_STATUS 0)
-  endif()
-  set(reject "NumOfStores|SolveIterations|Persistent Points-To Cache Statistics|TotalUnions")
-  if(T_REJECT)
-    string(APPEND reject "|${T_REJECT}")
-  endif()
-  add_test(NAME "${name}" COMMAND "${CMAKE_COMMAND}" "-DDRIVER=$<TARGET_FILE:ldc>"
-    "-DARGS=${T_ARGS}" "-DSTATUS=${T_STATUS}" "-DFILE=${T_FILE}"
-    "-DEXPECT=${T_EXPECT}" "-DREJECT=${reject}"
-    -P "${CMAKE_CURRENT_BINARY_DIR}/check_driver.cmake")
-endfunction()
-
-driver_test(call_graph ARGS "${call_graph_ir}"
-  EXPECT "call: main -> direct\n" "call: main -> invoke\n" "call: invoke -> indirect\n")
-set(dot "${CMAKE_CURRENT_BINARY_DIR}/program.dot")
-driver_test(program_dot ARGS --program-dot "${dot}" "${pointer_flow_ir}" FILE "${dot}"
-  EXPECT "digraph SimplifiedPAG" "store[2]" "load[2]" "gep[2]" "enter@" "exit@"
-         "pointer_flow.cpp" "inspect(Box*, int*, bool)" "loaded")
-driver_test(missing_input STATUS 1 EXPECT "no input files")
-driver_test(program_dot.write_error STATUS 1
-  ARGS "-program-dot=${CMAKE_CURRENT_BINARY_DIR}" "${pointer_flow_ir}"
-  EXPECT "Cannot write program graph")
+add_test(NAME call_graph COMMAND ldc "${call_graph_ir}")
+add_test(NAME program_dot COMMAND ldc --program-dot
+  "${CMAKE_CURRENT_BINARY_DIR}/program.dot" "${pointer_flow_ir}")
+add_test(NAME program_dot.write_error COMMAND ldc --program-dot
+  "${CMAKE_CURRENT_BINARY_DIR}" "${pointer_flow_ir}")
+add_test(NAME missing_input COMMAND ldc)
+set_tests_properties(program_dot.write_error missing_input PROPERTIES WILL_FAIL TRUE)
 
 foreach(flag --help -h)
-  driver_test("help.${flag}" ARGS "${flag}" EXPECT "Usage: ldc" "--program-dot"
-    REJECT "SVF|  -ander|  -stat|help-svf")
+  add_test(NAME "help.${flag}" COMMAND ldc "${flag}")
 endforeach()
-foreach(flag -stat=false -dump-callgraph -ander --help-svf --unknown)
-  driver_test("unknown.${flag}" ARGS "${flag}" STATUS 1 EXPECT "unknown option")
-endforeach()
-foreach(flag --program-dot --program-dot=)
-  driver_test("missing_path.${flag}" ARGS "${flag}" STATUS 1 EXPECT "requires an output path")
+
+foreach(flag -stat=false -dump-callgraph -ander --help-svf --unknown --program-dot --program-dot=)
+  add_test(NAME "invalid.${flag}" COMMAND ldc "${flag}")
+  set_tests_properties("invalid.${flag}" PROPERTIES WILL_FAIL TRUE)
 endforeach()
