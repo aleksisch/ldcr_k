@@ -1,5 +1,5 @@
 #include "ldc/Builder.h"
-#include "ldc/SVFEdges.h"
+#include "SVFDetails.h"
 #include "ldc/SVFFrontend.h"
 #include <stdexcept>
 
@@ -39,10 +39,10 @@ void BuildStats::print(std::ostream& os) const {
 
 namespace {
 
-using frontend::IndirectCalls;
-using frontend::relevant;
-using frontend::SvfEdge;
-using frontend::SvfEdges;
+using frontend::detail::IndirectCalls;
+using frontend::detail::relevant;
+using frontend::detail::SvfEdge;
+using frontend::detail::SvfEdges;
 
 bool isIntrinsicName(const std::string& name) { return name.rfind("llvm.", 0) == 0; }
 
@@ -334,10 +334,10 @@ public:
         : pag_(pag), callGraph_(callGraph), mode_(mode), stats_(stats) {}
 
     LDGraph run() {
-        const auto statements = frontend::statementEdges(pag_);
+        const auto statements = frontend::detail::statementEdges(pag_);
         stats_.variantGeps = statements.variantGeps;
         add(statements.edges);
-        add(frontend::indirectCalls(pag_, callGraph_, mode_ == Mode::Lfc));
+        add(frontend::detail::indirectCalls(pag_, callGraph_, mode_ == Mode::Lfc));
 
         const std::vector<VTable> vtables = collectVTables(pag_);
         const Hierarchy hierarchy = collectHierarchy();
@@ -359,8 +359,9 @@ private:
         if (!isObj)
             if (const FunObjVar* fun = var->getFunction())
                 function = llvm::demangle(fun->getName());
-        const NodeId id = graph_.nodeFor(var->getId(), isObj ? NodeKind::Obj : NodeKind::Var, name,
-                                         function, frontend::sourceLine(var->getSourceLoc()));
+        const NodeId id =
+            graph_.nodeFor(var->getId(), isObj ? NodeKind::Obj : NodeKind::Var, name, function,
+                           frontend::detail::sourceLine(var->getSourceLoc()));
         // Field limit as SVF has it after Andersen: 0 = SVF made the object field-insensitive
         // (e.g. after pointer arithmetic over its fields); we follow, so all fields are `*`.
         if (const auto* object = SVFUtil::dyn_cast<BaseObjVar>(var))
@@ -379,7 +380,7 @@ private:
         if (it != callSiteIds_.end()) return it->second;
         CallSite site;
         site.caller = llvm::demangle(cs->getCaller()->getName());
-        site.line = frontend::sourceLine(cs->getSourceLoc());
+        site.line = frontend::detail::sourceLine(cs->getSourceLoc());
         site.isVirtual = cs->isVirtualCall();
         CallSiteId id = graph_.addCallSite(site);
         callSiteIds_.emplace(cs, id);
@@ -394,8 +395,9 @@ private:
                 continue;
             }
             const NodeId from = node(e.src); // before node(e.dst): node ids follow this order
-            graph_.addEdge(Edge{from, node(e.dst), analysisLabel(e.label), e.field, kUnknownType,
-                                site, analysisDirection(e.dir)});
+            graph_.addEdge(Edge{from, node(e.dst), analysisLabel(e.label),
+                                e.field.value_or(kNoField), kUnknownType, site,
+                                analysisDirection(e.dir)});
         }
     }
 

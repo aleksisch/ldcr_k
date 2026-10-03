@@ -2,6 +2,7 @@
 
 #include "ldc/Builder.h"
 #include "ldc/SVFFrontend.h"
+#include "SVFDetails.h"
 #include "ldc/LDGraph.h"
 #include "ldc/P3Ctx.h"
 #include "ldc/Solver.h"
@@ -62,7 +63,7 @@ std::string functionKey(const std::string& name) { return name.substr(0, name.fi
 /// only in debug records. Formals keep their IR names.
 std::unordered_map<ldc::SvfId, std::string> debugNames() {
     std::unordered_map<ldc::SvfId, std::string> names;
-    for (const auto& [id, source] : ldc::frontend::debugNames())
+    for (const auto& [id, source] : ldc::frontend::detail::debugNames())
         names.emplace(id, functionKey(source.function) + "::" + source.name);
     return names;
 }
