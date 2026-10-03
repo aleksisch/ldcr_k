@@ -1,11 +1,12 @@
 # ldc_compile_ir(<src> <out-var>): compile a C++ file to LLVM IR the way ldc expects it
-# (clang++ from the SVF image, -O0 without optnone, debug info for names, then mem2reg).
+# (clang++ from the selected LLVM installation, -O0 without optnone, debug info for names, then mem2reg).
 # -flto -fwhole-program-vtables only add type tests at virtual calls: the static class of
 # the receiver, used as DeclTypeOf(r) (see Builder::declaredClass).
 
-get_filename_component(_ldc_llvm_bin "${LLVM_DIR}/../../../bin" ABSOLUTE)
-find_program(LDC_CLANGXX clang++ HINTS "${_ldc_llvm_bin}" REQUIRED)
-find_program(LDC_OPT opt HINTS "${_ldc_llvm_bin}" REQUIRED)
+# Avoid silently using unrelated LLVM tools from PATH. Explicit cache overrides
+# are available for installations with a custom tool layout.
+find_program(LDC_CLANGXX clang++ HINTS "${LLVM_TOOLS_BINARY_DIR}" NO_DEFAULT_PATH REQUIRED)
+find_program(LDC_OPT opt HINTS "${LLVM_TOOLS_BINARY_DIR}" NO_DEFAULT_PATH REQUIRED)
 
 function(ldc_compile_ir src out_var)
   get_filename_component(name "${src}" NAME_WE)
