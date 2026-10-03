@@ -188,7 +188,7 @@ int main(int argc, char** argv) try {
 
     SVFIRBuilder builder;
     SVFIR* pag = builder.build();
-    Andersen* ander = AndersenWaveDiff::createAndersenWaveDiff(pag);
+    auto ander = ldc::frontend::detail::runAndersen(*pag);
 
     // Andersen augments the initial graph with resolved indirect and virtual calls.
     // Print stable, unique caller/callee pairs; SVF retains the call-site information.
@@ -255,7 +255,7 @@ int main(int argc, char** argv) try {
         graph.dumpDot(dot);
         std::cout << "LDGraph written to " << cli.analysisDot << "\n";
     }
-    AndersenWaveDiff::releaseAndersenWaveDiff();
+    ander.reset();
     SVFIR::releaseSVFIR();
     LLVMModuleSet::releaseLLVMModuleSet();
     return ok ? 0 : 1;
