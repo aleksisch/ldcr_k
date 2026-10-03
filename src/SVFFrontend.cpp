@@ -20,7 +20,9 @@ namespace ldc::frontend {
 namespace detail {
 
 std::unique_ptr<AndersenWaveDiff> runAndersen(SVFIR& pag) {
-    auto analysis = std::make_unique<AndersenWaveDiff>(&pag, PTATY::AndersenWaveDiff_WPA, false);
+    using AnalysisKind = decltype(std::declval<AndersenWaveDiff>().getAnalysisTy());
+    auto analysis =
+        std::make_unique<AndersenWaveDiff>(&pag, AnalysisKind::AndersenWaveDiff_WPA, false);
     analysis->disablePrintStat();
     analysis->analyze();
     return analysis;
