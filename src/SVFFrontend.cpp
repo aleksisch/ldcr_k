@@ -19,6 +19,13 @@ using namespace SVF;
 namespace ldc::frontend {
 namespace detail {
 
+std::unique_ptr<AndersenWaveDiff> runAndersen(SVFIR& pag) {
+    auto analysis = std::make_unique<AndersenWaveDiff>(&pag, PTATY::AndersenWaveDiff_WPA, false);
+    analysis->disablePrintStat();
+    analysis->analyze();
+    return analysis;
+}
+
 int sourceLine(const std::string& location) {
     static const std::regex lineRe(R"re("?ln"?\s*:\s*(\d+))re");
     std::smatch match;
@@ -179,7 +186,6 @@ FrontendResult analyzeModules(const std::vector<std::string>& modules) {
     // Release in reverse dependency order, including when result construction throws.
     struct Session {
         ~Session() {
-            AndersenWaveDiff::releaseAndersenWaveDiff();
             SVFIR::releaseSVFIR();
             LLVMModuleSet::releaseLLVMModuleSet();
         }
@@ -187,7 +193,7 @@ FrontendResult analyzeModules(const std::vector<std::string>& modules) {
     LLVMModuleSet::buildSVFModule(modules);
     SVFIRBuilder builder;
     auto* pag = builder.build();
-    auto* andersen = AndersenWaveDiff::createAndersenWaveDiff(pag);
+    auto andersen = detail::runAndersen(*pag);
 
     FrontendResult result;
     result.svfNodeCount = pag->getTotalNodeNum();
