@@ -7,8 +7,8 @@ shift 4
 root=$(cd "$(dirname "$0")/.." && pwd)
 mkdir -p "$out"
 docker run --rm -u "$(id -u):$(id -g)" -v "$root":/w -w /w ldc-dev sh -c "
-  $build/ldc -stat=false -ldc-k=$k -ldc-mode=ldcr $* -ldc-export=$out $ll > /dev/null &&
-  $build/ldc -stat=false -ldc-k=$k -ldc-mode=ldcr $* -ldc-facts=$out/worklist.txt $ll | grep ^Solver"
+  $build/ldc -ldc-k=$k -ldc-mode=ldcr $* -ldc-export=$out $ll > /dev/null &&
+  $build/ldc -ldc-k=$k -ldc-mode=ldcr $* -ldc-facts=$out/worklist.txt $ll | grep ^Solver"
 docker run --rm -u "$(id -u):$(id -g)" -v "$root/third_party/CFPQ_PyAlgo":/app -v "$root":/w \
   -w /w cfpq/py_algo:latest -c "python3 cfl/ldcr.py $out -k $k --facts $out/cfl.txt"
 # SVF numbers some values differently from run to run.

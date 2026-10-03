@@ -161,7 +161,7 @@ ${error}")
     message(FATAL_ERROR "Dependency options leaked into help: ${output}")
   endif()
 endforeach()
-foreach(flag -dump-callgraph -ander --help-svf --unknown)
+foreach(flag -stat=false -dump-callgraph -ander --help-svf --unknown)
   execute_process(COMMAND "${DRIVER}" "${flag}"
     RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE error)
   if(NOT status STREQUAL "1" OR NOT output STREQUAL "" OR NOT error MATCHES "unknown option")
