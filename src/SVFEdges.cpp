@@ -31,7 +31,7 @@ bool relevant(const SVFVar* var) {
 
 namespace {
 struct Geps {
-    std::unordered_map<SvfId, std::pair<const SVFVar*, FieldId>> def; ///< result -> (base, f)
+    std::unordered_map<SvfId, std::pair<const SVFVar*, FieldOffset>> def; ///< result -> (base, f)
     std::size_t variant = 0; ///< geps with a variable struct field (field `*`)
 };
 
@@ -40,26 +40,27 @@ Geps collectGeps(SVFIR& pag) {
     for (const SVFStmt* stmt : pag.getSVFStmtSet(SVFStmt::Gep)) {
         const auto* gep = SVFUtil::cast<GepStmt>(stmt);
         // As SVF: array indices are ignored; only arithmetic over struct fields loses the field.
-        FieldId field = kAnyField;
+        FieldOffset field = kAnyField;
         if (!gep->isVariantFieldGep())
-            field = static_cast<FieldId>(gep->getConstantStructFldIdx());
+            field = FieldOffset{static_cast<std::int32_t>(gep->getConstantStructFldIdx())};
         else
             ++geps.variant;
-        geps.def[gep->getLHSVarID()] = {gep->getRHSVar(), field};
+        geps.def[SvfId{gep->getLHSVarID()}] = {gep->getRHSVar(), field};
     }
     return geps;
 }
 
 /// Resolves an address to (base pointer, field), following chains of geps.
-std::pair<const SVFVar*, FieldId> resolveAddress(const Geps& geps, const SVFVar* ptr) {
-    FieldId field = 0;
+std::pair<const SVFVar*, FieldOffset> resolveAddress(const Geps& geps, const SVFVar* ptr) {
+    FieldOffset field{0};
     const SVFVar* base = ptr;
     std::unordered_set<SvfId> visited;
-    for (auto it = geps.def.find(base->getId()); it != geps.def.end();
-         it = geps.def.find(base->getId())) {
-        if (!visited.insert(base->getId()).second) return {base, kAnyField};
-        const FieldId step = it->second.second;
-        field = (field == kAnyField || step == kAnyField) ? kAnyField : field + step;
+    for (auto it = geps.def.find(SvfId{base->getId()}); it != geps.def.end();
+         it = geps.def.find(SvfId{base->getId()})) {
+        if (!visited.insert(SvfId{base->getId()}).second) return {base, kAnyField};
+        const FieldOffset step = it->second.second;
+        field = (field == kAnyField || step == kAnyField) ? kAnyField
+                                                          : FieldOffset{field.value + step.value};
         base = it->second.first;
     }
     return {base, field};
@@ -69,7 +70,8 @@ std::pair<const SVFVar*, FieldId> resolveAddress(const Geps& geps, const SVFVar*
 std::unordered_set<SvfId> findEscapingGeps(SVFIR& pag, const Geps& geps) {
     std::unordered_set<SvfId> escaping;
     auto check = [&](const SVFVar* var) {
-        if (var != nullptr && geps.def.count(var->getId()) != 0) escaping.insert(var->getId());
+        if (var != nullptr && geps.def.count(SvfId{var->getId()}) != 0)
+            escaping.insert(SvfId{var->getId()});
     };
     for (const SVFStmt* stmt : pag.getSVFStmtSet(SVFStmt::Copy))
         check(SVFUtil::cast<CopyStmt>(stmt)->getRHSVar());
@@ -97,7 +99,7 @@ std::unordered_set<SvfId> findEscapingGeps(SVFIR& pag, const Geps& geps) {
 SvfEdges statementEdges(SVFIR& pag, const Geps& geps, const std::unordered_set<SvfId>& escaping) {
     SvfEdges edges;
     for (SvfId id : escaping) {
-        const SVFVar* gep = pag.getGNode(id);
+        const SVFVar* gep = pag.getGNode(id.value);
         const auto [base, field] = resolveAddress(geps, gep);
         edges.push_back({base, gep, Label::Gep, field});
     }
