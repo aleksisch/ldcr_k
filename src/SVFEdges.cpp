@@ -37,7 +37,7 @@ struct Geps {
 
 Geps collectGeps(SVFIR& pag) {
     Geps geps;
-    for (const SVFStmt* stmt : pag.getSVFStmtSet(SVFStmt::Gep)) {
+    for (const auto* stmt : pag.getSVFStmtSet(SVFStmt::Gep)) {
         const auto* gep = SVFUtil::cast<GepStmt>(stmt);
         // As SVF: array indices are ignored; only arithmetic over struct fields loses the field.
         FieldOffset field = kAnyField;
@@ -73,23 +73,23 @@ std::unordered_set<SvfId> findEscapingGeps(SVFIR& pag, const Geps& geps) {
         if (var != nullptr && geps.def.count(SvfId{var->getId()}) != 0)
             escaping.insert(SvfId{var->getId()});
     };
-    for (const SVFStmt* stmt : pag.getSVFStmtSet(SVFStmt::Copy))
+    for (const auto* stmt : pag.getSVFStmtSet(SVFStmt::Copy))
         check(SVFUtil::cast<CopyStmt>(stmt)->getRHSVar());
-    for (const SVFStmt* stmt : pag.getSVFStmtSet(SVFStmt::Store))
+    for (const auto* stmt : pag.getSVFStmtSet(SVFStmt::Store))
         check(SVFUtil::cast<StoreStmt>(stmt)->getRHSVar()); // stored value, not the address
-    for (const SVFStmt* stmt : pag.getSVFStmtSet(SVFStmt::Call))
-        for (const ValVar* op : SVFUtil::cast<CallPE>(stmt)->getOpndVars()) check(op);
+    for (const auto* stmt : pag.getSVFStmtSet(SVFStmt::Call))
+        for (const auto* op : SVFUtil::cast<CallPE>(stmt)->getOpndVars()) check(op);
     // Indirect calls do not necessarily have CallPE statements in SVFIR.
     for (const auto* site : pag.getCallSiteSet())
         for (const auto* actual : site->getActualParms()) check(actual);
-    for (const SVFStmt* stmt : pag.getSVFStmtSet(SVFStmt::Ret))
+    for (const auto* stmt : pag.getSVFStmtSet(SVFStmt::Ret))
         check(SVFUtil::cast<RetPE>(stmt)->getRHSVar()); // returned
     for (const auto& entry : pag.getFunRets())
         check(entry.second); // returned (also from functions without callers)
-    for (const SVFStmt* stmt : pag.getSVFStmtSet(SVFStmt::Phi))
-        for (const ValVar* op : SVFUtil::cast<PhiStmt>(stmt)->getOpndVars()) check(op);
-    for (const SVFStmt* stmt : pag.getSVFStmtSet(SVFStmt::Select))
-        for (const ValVar* op : SVFUtil::cast<SelectStmt>(stmt)->getOpndVars()) check(op);
+    for (const auto* stmt : pag.getSVFStmtSet(SVFStmt::Phi))
+        for (const auto* op : SVFUtil::cast<PhiStmt>(stmt)->getOpndVars()) check(op);
+    for (const auto* stmt : pag.getSVFStmtSet(SVFStmt::Select))
+        for (const auto* op : SVFUtil::cast<SelectStmt>(stmt)->getOpndVars()) check(op);
     return escaping;
 }
 
@@ -98,35 +98,35 @@ std::unordered_set<SvfId> findEscapingGeps(SVFIR& pag, const Geps& geps) {
 /// the field objects ⟨O, off + f⟩, like SVF's GepObjVar.
 SvfEdges statementEdges(SVFIR& pag, const Geps& geps, const std::unordered_set<SvfId>& escaping) {
     SvfEdges edges;
-    for (SvfId id : escaping) {
+    for (auto id : escaping) {
         const SVFVar* gep = pag.getGNode(id.value);
         const auto [base, field] = resolveAddress(geps, gep);
         edges.push_back({base, gep, Label::Gep, field});
     }
     auto stmts = [&](SVFStmt::PEDGEK kind) { return pag.getSVFStmtSet(kind); };
-    for (const SVFStmt* s : stmts(SVFStmt::Addr))
+    for (const auto* s : stmts(SVFStmt::Addr))
         edges.push_back({s->getSrcNode(), s->getDstNode(), Label::New});
-    for (const SVFStmt* s : stmts(SVFStmt::Copy))
+    for (const auto* s : stmts(SVFStmt::Copy))
         edges.push_back({s->getSrcNode(), s->getDstNode(), Label::Assign});
-    for (SVFStmt::PEDGEK kind : {SVFStmt::Phi, SVFStmt::Select})
-        for (const SVFStmt* s : stmts(kind))
-            for (const ValVar* op : SVFUtil::cast<MultiOpndStmt>(s)->getOpndVars())
+    for (auto kind : {SVFStmt::Phi, SVFStmt::Select})
+        for (const auto* s : stmts(kind))
+            for (const auto* op : SVFUtil::cast<MultiOpndStmt>(s)->getOpndVars())
                 edges.push_back({op, s->getDstNode(), Label::Assign});
-    for (const SVFStmt* s : stmts(SVFStmt::Store)) { // *p = v  →  v --store[f]--> base(p)
+    for (const auto* s : stmts(SVFStmt::Store)) { // *p = v  →  v --store[f]--> base(p)
         auto [base, field] = resolveAddress(geps, s->getDstNode());
         edges.push_back({s->getSrcNode(), base, Label::Store, field});
     }
-    for (const SVFStmt* s : stmts(SVFStmt::Load)) { // x = *p  →  base(p) --load[f]--> x
+    for (const auto* s : stmts(SVFStmt::Load)) { // x = *p  →  base(p) --load[f]--> x
         auto [base, field] = resolveAddress(geps, s->getSrcNode());
         edges.push_back({base, s->getDstNode(), Label::Load, field});
     }
-    for (const SVFStmt* s : stmts(SVFStmt::Call)) { // formal ← one actual per call site
+    for (const auto* s : stmts(SVFStmt::Call)) { // formal ← one actual per call site
         const auto* call = SVFUtil::cast<CallPE>(s);
-        for (u32_t i = 0; i < call->getOpVarNum(); ++i)
+        for (auto i = 0u; i < call->getOpVarNum(); ++i)
             edges.push_back({call->getOpVar(i), call->getRes(), Label::Assign, std::nullopt,
                              call->getOpCallICFGNode(i), CallDir::Enter});
     }
-    for (const SVFStmt* s : stmts(SVFStmt::Ret)) { // formal return → actual return
+    for (const auto* s : stmts(SVFStmt::Ret)) { // formal return → actual return
         const auto* ret = SVFUtil::cast<RetPE>(s);
         edges.push_back({ret->getRHSVar(), ret->getLHSVar(), Label::Assign, std::nullopt,
                          ret->getCallInst(), CallDir::Exit});
@@ -140,10 +140,10 @@ SvfEdges statementEdges(SVFIR& pag, const Geps& geps, const std::unordered_set<S
 IndirectCalls indirectCalls(SVFIR& pag, const CallGraph& callGraph, bool virtualCalls) {
     IndirectCalls calls;
     for (const auto& entry : callGraph)
-        for (const CallGraphEdge* cgEdge : entry.second->getOutEdges()) {
+        for (const auto* cgEdge : entry.second->getOutEdges()) {
             if (!cgEdge->isIndirectCallEdge()) continue;
             const FunObjVar* callee = cgEdge->getDstNode()->getFunction();
-            for (const CallICFGNode* cs : cgEdge->getIndirectCalls()) {
+            for (const auto* cs : cgEdge->getIndirectCalls()) {
                 calls.sites.push_back(cs);
                 if (cs->isVirtualCall() && !virtualCalls) continue;
                 if (pag.hasFunArgsList(callee)) {

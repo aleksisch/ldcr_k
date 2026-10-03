@@ -11,7 +11,7 @@ namespace {
 const char* const labels[] = {"new", "assign", "store", "load", "gep"};
 std::string escapeDot(const std::string& text) {
     std::string out;
-    for (char c : text) {
+    for (auto c : text) {
         switch (c) {
         case '"': out += "\\\""; break;
         case '\\': out += "\\\\"; break;
@@ -29,7 +29,7 @@ std::string escapeDot(const std::string& text) {
 NodeId SimplifiedPAG::addNode(const Node& node) {
     if (node.svfId)
         if (auto id = findSvf(*node.svfId)) return *id;
-    const NodeId id = NodeId{static_cast<std::uint32_t>(nodes_.size())};
+    const auto id = NodeId{static_cast<std::uint32_t>(nodes_.size())};
     nodes_.push_back(node);
     if (node.svfId) bySvf_.emplace(*node.svfId, id);
     return id;
@@ -65,7 +65,7 @@ void SimplifiedPAG::printSummary(std::ostream& out) const {
 void SimplifiedPAG::dumpDot(std::ostream& out) const {
     out << "digraph SimplifiedPAG {\n  rankdir=LR;\n";
     for (std::size_t id = 0; id < nodes_.size(); ++id) {
-        const Node& node = nodes_[id];
+        const auto& node = nodes_[id];
         std::string text = node.function.empty() ? "" : node.function + "::";
         text += node.sourceName.empty() ? node.name : node.sourceName;
         if (node.line) text += " @" + std::to_string(node.line);
@@ -74,7 +74,7 @@ void SimplifiedPAG::dumpDot(std::ostream& out) const {
         if (node.svfId) out << ", svf_id=\"" << node.svfId->value << "\"";
         out << ", source=\"" << escapeDot(node.sourceLocation) << "\"];\n";
     }
-    for (const Edge& edge : edges_) {
+    for (const auto& edge : edges_) {
         std::string text = labels[static_cast<std::size_t>(edge.label)];
         if (edge.field == kAnyField)
             text += "[*]";

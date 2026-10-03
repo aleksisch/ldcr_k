@@ -41,13 +41,13 @@ std::unordered_map<SvfId, DebugName> debugNames() {
         if (value && modules->hasValueNode(value))
             names.emplace(SvfId{modules->getValueNode(value)}, DebugName{function, name});
     };
-    for (u32_t i = 0; i < modules->getModuleNum(); ++i)
-        for (const llvm::Function& fn : *modules->getModule(i)) {
+    for (auto i = 0u; i < modules->getModuleNum(); ++i)
+        for (const auto& fn : *modules->getModule(i)) {
             const auto function = llvm::demangle(fn.getName().str());
-            for (const llvm::Argument& arg : fn.args())
+            for (const auto& arg : fn.args())
                 if (arg.hasName()) record(&arg, function, arg.getName().str());
-            for (const llvm::BasicBlock& block : fn)
-                for (const llvm::Instruction& inst : block)
+            for (const auto& block : fn)
+                for (const auto& inst : block)
                     for (const llvm::DbgVariableRecord& dvr :
                          llvm::filterDbgVars(inst.getDbgRecordRange()))
                         if (dvr.getVariable() && dvr.getNumVariableLocationOps() == 1)

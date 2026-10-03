@@ -8,7 +8,7 @@ namespace ldc {
 CommandLine parseCommandLine(int argc, char** argv) {
     CommandLine result;
     bool positionalOnly = false;
-    for (int i = 1; i < argc; ++i) {
+    for (auto i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         const auto equals = arg.find('=');
         const auto name = arg.substr(0, equals);
