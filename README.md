@@ -75,8 +75,18 @@ cmake -S . -B build-native -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DSVF_DIR="$SVF_DIR" -DLLVM_DIR="$LLVM_DIR" -DZ3_DIR="$Z3_DIR"
 cmake --build build-native --parallel 2
-ctest --test-dir build-native --output-on-failure
+CTEST_OUTPUT_ON_FAILURE=1 cmake --build build-native --target test
 ```
+
+`test` is CMake's standard test target. Build the default `all` target first as
+shown above: `test` runs CTest but does not build test binaries or IR fixtures.
+`CTEST_OUTPUT_ON_FAILURE=1` displays diagnostic output for failing tests.
+You can also run CTest directly with `ctest --test-dir build-native --output-on-failure`.
+
+[GitHub Actions](.github/workflows/ci.yml) runs the same native build and `test`
+target on pull requests and pushes to `master`, and supports manual runs.
+It uses Ubuntu 24.04 and the pinned SVF/LLVM/Z3 bootstrap above, caching the
+native toolchain between runs. The first run builds SVF from source.
 
 The tests check direct and resolved function-pointer calls, nested field offsets,
 argument/return flow, source/debug information, IR without debug information,

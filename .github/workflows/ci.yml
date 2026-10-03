@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Native CMake build and test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      SVF_COMMIT: f78454fb8d71b0d16c80a6f009b8a1d1c20c75e5
+      LDCR_DEPS: ${{ runner.temp }}/ldcr-deps
+      CTEST_OUTPUT_ON_FAILURE: '1'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Install build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build git curl wget unzip xz-utils \
+            libncurses-dev zlib1g-dev libzstd-dev libffi-dev libxml2-dev
+
+      - name: Cache native SVF toolchain
+        id: svf-cache
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ${{ env.LDCR_DEPS }}
+          key: svf-ubuntu-24.04-${{ runner.arch }}-${{ env.SVF_COMMIT }}-v1
+
+      - name: Build SVF and download LLVM/Z3
+        if: steps.svf-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$LDCR_DEPS/SVF"
+          git -C "$LDCR_DEPS/SVF" init
+          git -C "$LDCR_DEPS/SVF" remote add origin https://github.com/SVF-tools/SVF.git
+          git -C "$LDCR_DEPS/SVF" fetch --depth 1 origin "$SVF_COMMIT"
+          git -C "$LDCR_DEPS/SVF" checkout --detach FETCH_HEAD
+          cd "$LDCR_DEPS/SVF"
+          unset LLVM_DIR Z3_DIR
+          SVF_BUILD_JOBS=2 bash ./build.sh
+          # Work around the missing include path exported by this SVF revision.
+          mkdir -p Release-build/include/SVF
+
+      - name: Configure dependency paths
+        run: |
+          echo "SVF_DIR=$LDCR_DEPS/SVF/Release-build/lib/cmake/SVF" >> "$GITHUB_ENV"
+          echo "LLVM_DIR=$LDCR_DEPS/SVF/llvm-21.1.0.obj/lib/cmake/llvm" >> "$GITHUB_ENV"
+          echo "Z3_DIR=$LDCR_DEPS/SVF/z3.obj" >> "$GITHUB_ENV"
+          echo "$LDCR_DEPS/SVF/llvm-21.1.0.obj/bin" >> "$GITHUB_PATH"
+          echo "LD_LIBRARY_PATH=$LDCR_DEPS/SVF/Release-build/lib:$LDCR_DEPS/SVF/Release-build/svf:$LDCR_DEPS/SVF/Release-build/svf-llvm:$LDCR_DEPS/SVF/llvm-21.1.0.obj/lib:$LDCR_DEPS/SVF/z3.obj/bin" >> "$GITHUB_ENV"
+
+      - name: Configure
+        run: >-
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DSVF_DIR="$SVF_DIR" -DLLVM_DIR="$LLVM_DIR" -DZ3_DIR="$Z3_DIR"
+
+      - name: Build all targets and fixtures
+        run: cmake --build build --parallel 2
+
+      - name: Run all tests
+        run: cmake --build build --target test
