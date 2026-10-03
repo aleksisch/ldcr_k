@@ -88,6 +88,10 @@ execute_process(COMMAND "${DRIVER}" "${IR}"
 if(NOT status EQUAL 0)
   message(FATAL_ERROR "Driver failed: ${status}\n${output}\n${error}")
 endif()
+if(output MATCHES "NumOfStores|SolveIterations|Persistent Points-To Cache Statistics|TotalUnions")
+  message(FATAL_ERROR "Dependency statistics leaked into output:
+${output}")
+endif()
 foreach(edge "main -> direct" "main -> invoke" "invoke -> indirect")
   string(FIND "${output}" "call: ${edge}\n" found)
   if(found EQUAL -1)
@@ -122,6 +126,10 @@ execute_process(COMMAND "${DRIVER}" --program-dot "${DOT}" "${IR}"
   RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE error)
 if(NOT status EQUAL 0)
   message(FATAL_ERROR "Graph export failed: ${status}\n${output}\n${error}")
+endif()
+if(output MATCHES "NumOfStores|SolveIterations|Persistent Points-To Cache Statistics|TotalUnions")
+  message(FATAL_ERROR "Dependency statistics leaked into export output:
+${output}")
 endif()
 file(READ "${DOT}" graph)
 foreach(fragment "digraph SimplifiedPAG" "store[2]" "load[2]" "gep[2]"

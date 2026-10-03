@@ -2,16 +2,21 @@
 
 #include "ldc/SimplifiedPAG.h"
 #include <cstddef>
+#include <memory>
 #include <vector>
 
 namespace SVF {
 class SVFIR;
+class AndersenWaveDiff;
 class SVFVar;
 class CallGraph;
 class CallICFGNode;
 } // namespace SVF
 
 namespace ldc::frontend::detail {
+
+// Configure statistics before analyze(); SVF's singleton factory runs immediately.
+std::unique_ptr<SVF::AndersenWaveDiff> runAndersen(SVF::SVFIR& pag);
 
 // Non-owning extraction results for consumers that build a specialized graph.
 // SVF must remain alive while these pointers are used.
