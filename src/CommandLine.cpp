@@ -1,7 +1,6 @@
 #include "CommandLine.h"
 #include <ostream>
 #include <charconv>
-#include <stdexcept>
 
 namespace ldc {
 
@@ -14,14 +13,13 @@ CommandLine parseCommandLine(int argc, char** argv) {
         const auto name = arg.substr(0, equals);
         const auto key = name.rfind("--", 0) == 0 ? name.substr(1) : name;
         auto value = [&]() -> std::string {
-            if (equals != std::string::npos) {
-                if (equals + 1 == arg.size())
-                    throw std::invalid_argument(name + " requires a value");
-                return arg.substr(equals + 1);
-            }
-            if (i + 1 == argc || argv[i + 1][0] == '-')
-                throw std::invalid_argument(name + " requires a value");
-            return argv[++i];
+            std::string text;
+            if (equals != std::string::npos)
+                text = arg.substr(equals + 1);
+            else if (i + 1 < argc && argv[i + 1][0] != '-')
+                text = argv[++i];
+            if (text.empty()) result.error = name + " requires a value";
+            return text;
         };
         if (positionalOnly) {
             result.modules.push_back(arg);
@@ -31,18 +29,17 @@ CommandLine parseCommandLine(int argc, char** argv) {
             result.help = true;
         } else if (arg == "--program-dot" || arg == "-program-dot" ||
                    arg.rfind("--program-dot=", 0) == 0 || arg.rfind("-program-dot=", 0) == 0) {
-            if (!result.programDot.empty())
-                throw std::invalid_argument("duplicate option: --program-dot");
+            if (!result.programDot.empty()) return {.error = "duplicate option: --program-dot"};
             const auto equals = arg.find('=');
             if (equals != std::string::npos) {
                 result.programDot = arg.substr(equals + 1);
             } else {
                 if (i + 1 == argc || argv[i + 1][0] == '-')
-                    throw std::invalid_argument("--program-dot requires an output path");
+                    return {.error = "--program-dot requires an output path"};
                 result.programDot = argv[++i];
             }
             if (result.programDot.empty())
-                throw std::invalid_argument("--program-dot requires an output path");
+                return {.error = "--program-dot requires an output path"};
         } else if (key == "-ldc-dot") {
             result.analysisDot = value();
         } else if (key == "-ldc-src") {
@@ -55,25 +52,26 @@ CommandLine parseCommandLine(int argc, char** argv) {
             result.mode = value();
             if (result.mode != "lfc" && result.mode != "kcfa" && result.mode != "ldc" &&
                 result.mode != "ldcr")
-                throw std::invalid_argument("unknown analysis mode: " + result.mode);
+                return {.error = "unknown analysis mode: " + result.mode};
         } else if (key == "-ldc-k") {
             const auto text = value();
             const auto parsed = std::from_chars(text.data(), text.data() + text.size(), result.k);
             if (parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size())
-                throw std::invalid_argument("--ldc-k requires a nonnegative integer");
+                return {.error = "--ldc-k requires a nonnegative integer"};
         } else if (key == "-ldc-p3ctx" || key == "-ldc-andersen") {
             const auto text = equals == std::string::npos ? "true" : value();
             if (text != "true" && text != "false")
-                throw std::invalid_argument(name + " expects true or false");
+                return {.error = name + " expects true or false"};
             (key == "-ldc-p3ctx" ? result.p3ctx : result.compareAndersen) = text == "true";
         } else if (!arg.empty() && arg[0] == '-') {
-            throw std::invalid_argument("unknown option: " + arg);
+            return {.error = "unknown option: " + arg};
         } else {
             result.modules.push_back(arg);
         }
+        if (!result.error.empty()) return result;
     }
     if (!result.help && result.modules.empty())
-        throw std::invalid_argument("no input files; use --help for usage");
+        return {.error = "no input files; use --help for usage"};
     return result;
 }
 

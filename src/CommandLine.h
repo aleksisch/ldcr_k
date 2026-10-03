@@ -10,6 +10,7 @@ struct CommandLine {
     std::vector<std::string> modules;
     std::string programDot;
     bool help = false;
+    std::string error;
     std::string analysisDot;
     std::string sourceFile;
     std::string facts;

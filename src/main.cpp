@@ -162,8 +162,12 @@ std::size_t compareWithAndersen(const ldc::LDGraph& graph, const ldc::Solver& so
 
 } // namespace
 
-int main(int argc, char** argv) try {
+int main(int argc, char** argv) {
     const auto cli = ldc::parseCommandLine(argc, argv);
+    if (!cli.error.empty()) {
+        std::cerr << "ldc: " << cli.error << "\n";
+        return 1;
+    }
     if (cli.help) {
         ldc::printHelp(std::cout);
         return 0;
@@ -259,7 +263,4 @@ int main(int argc, char** argv) try {
     SVFIR::releaseSVFIR();
     LLVMModuleSet::releaseLLVMModuleSet();
     return ok ? 0 : 1;
-} catch (const std::exception& error) {
-    std::cerr << "ldc: " << error.what() << "\n";
-    return 1;
 }
