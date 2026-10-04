@@ -10,6 +10,7 @@ find_package(SVF CONFIG REQUIRED)
 find_package(CLI11 CONFIG REQUIRED)
 
 add_library(ldc_frontend
+  src/Dispatch.cpp
   src/SimplifiedPAG.cpp
   src/SVFEdges.cpp
   src/SVFFrontend.cpp)
