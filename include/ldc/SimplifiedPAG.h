@@ -42,9 +42,9 @@ namespace ldc::frontend {
 // Unknown field offset; an empty optional means the edge has no field.
 inline constexpr FieldOffset kAnyField{-2};
 
-enum class NodeKind { Var, Obj };
-enum class Label { New, Assign, Store, Load, Gep };
-enum class CallDir { None, Enter, Exit };
+enum class NodeKind { Var, Obj, Receiver };
+enum class Label { New, Assign, Store, Load, Gep, Dispatch };
+enum class CallDir { None, Enter, Exit, DispatchEnter, DispatchExit };
 
 struct Node {
     NodeKind kind = NodeKind::Var;
@@ -63,6 +63,7 @@ struct Edge {
     std::optional<FieldOffset> field; // flattened struct offset; arrays follow SVF's abstraction
     std::optional<CallSiteId> callSite;
     CallDir dir = CallDir::None;
+    std::optional<NodeId> type; // new[T], dispatch[T]: the vtable object of class T
 };
 
 struct CallTarget {
@@ -100,9 +101,13 @@ public:
     CallSiteId addCallSite(const CallSite& site);
     const std::vector<Node>& nodes() const { return nodes_; }
 
+    std::vector<Edge>& edges() { return edges_; }
+
     const std::vector<Edge>& edges() const { return edges_; }
 
     const std::vector<CallSite>& callSites() const { return sites_; }
+
+    CallSite& callSite(CallSiteId id) { return sites_[id.value]; }
 
     void printSummary(std::ostream& out) const;
     void dumpDot(std::ostream& out) const;

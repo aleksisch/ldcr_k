@@ -8,7 +8,7 @@ std::size_t std::hash<ldc::frontend::SvfId>::operator()(ldc::frontend::SvfId id)
 
 namespace ldc::frontend {
 namespace {
-const char* const labels[] = {"new", "assign", "store", "load", "gep"};
+const char* const labels[] = {"new", "assign", "store", "load", "gep", "dispatch"};
 std::string escapeDot(const std::string& text) {
     std::string out;
     for (auto c : text) {
@@ -72,9 +72,11 @@ void SimplifiedPAG::dumpDot(std::ostream& out) const {
             text += "[*]";
         else if (edge.field)
             text += "[" + std::to_string(edge.field->value) + "]";
-        if (edge.dir != CallDir::None && edge.callSite)
-            text += (edge.dir == CallDir::Enter ? " enter@" : " exit@") +
-                    std::to_string(edge.callSite->value);
+        if (edge.type) text += "[" + nodes_[edge.type->value].name + "]";
+        if (edge.dir != CallDir::None && edge.callSite) {
+            const char* dirs[] = {"", " enter@", " exit@", " dispatch-enter@", " dispatch-exit@"};
+            text += dirs[static_cast<std::size_t>(edge.dir)] + std::to_string(edge.callSite->value);
+        }
         out << "  n" << edge.src.value << " -> n" << edge.dst.value << " [label=\""
             << escapeDot(text) << "\"];\n";
     }

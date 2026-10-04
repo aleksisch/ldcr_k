@@ -1,4 +1,5 @@
 #include "ldc/SVFFrontend.h"
+#include "Dispatch.h"
 #include "SVFDetails.h"
 #include "Graphs/CallGraph.h"
 #include "SVF-LLVM/LLVMModule.h"
@@ -166,7 +167,9 @@ private:
 
 SimplifiedPAG buildSimplifiedPAG(SVFIR& pag, const CallGraph& calls, BuildStats& stats) {
     stats = {};
-    return Builder(pag, calls, stats).run();
+    auto graph = Builder(pag, calls, stats).run();
+    detail::buildDispatchGraph(pag, graph);
+    return graph;
 }
 
 void FrontendResult::printSummary(std::ostream& out) const {
