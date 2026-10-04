@@ -1,6 +1,12 @@
 ldc_compile_ir("${CMAKE_CURRENT_SOURCE_DIR}/fixtures/call_graph.cpp" call_graph_ir)
 ldc_compile_ir("${CMAKE_CURRENT_SOURCE_DIR}/fixtures/pointer_flow.cpp" pointer_flow_ir)
-add_custom_target(test_ir ALL DEPENDS "${call_graph_ir}" "${pointer_flow_ir}")
+ldc_compile_ir("${CMAKE_CURRENT_SOURCE_DIR}/fixtures/dispatch.cpp" dispatch_ir)
+add_custom_target(test_ir ALL DEPENDS "${call_graph_ir}" "${pointer_flow_ir}" "${dispatch_ir}")
+
+add_executable(dispatch_test dispatch_test.cpp)
+target_link_libraries(dispatch_test PRIVATE ldc_frontend)
+add_dependencies(dispatch_test test_ir)
+add_test(NAME dispatch_graph COMMAND dispatch_test "${dispatch_ir}")
 
 add_test(NAME call_graph COMMAND ldc "${call_graph_ir}")
 add_test(NAME program_dot COMMAND ldc --program-dot
