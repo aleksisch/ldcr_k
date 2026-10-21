@@ -1,0 +1,4 @@
+# Paper Fig. 8: both calls pass their argument through the same receiver object; L_R keeps the
+# argument of c4 for m and that of c5 for n.
+H::m::p -> i1
+H::n::q -> i2

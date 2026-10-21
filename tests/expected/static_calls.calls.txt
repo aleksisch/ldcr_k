@@ -1,0 +1,3 @@
+# id() is called at c1 with oa and at c2 with ob; each call returns its own argument.
+main::x -> oa
+main::y -> ob

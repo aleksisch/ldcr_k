@@ -5,7 +5,9 @@
 #include "SVFIR/SVFIR.h"
 #include "SVF-LLVM/CppUtil.h"
 #include "SVF-LLVM/LLVMModule.h"
+#include <llvm/Analysis/ValueTracking.h>
 #include <llvm/Demangle/Demangle.h>
+#include <llvm/IR/InstrTypes.h>
 #include <algorithm>
 #include <map>
 #include <set>
@@ -62,8 +64,10 @@ private:
         if (!hierarchy) return;
         auto* modules = LLVMModuleSet::getLLVMModuleSet();
         std::map<std::uint32_t, NodeId> constructed; // `this` actual -> class vtable
+        std::map<std::uint32_t, const CallICFGNode*> sites; // `this` actual -> its constructor call
         for (const auto* site : pag_.getCallSiteSet()) {
             const auto* callee = site->getCalledFunction();
+            if (!callee) callee = aliasedCallee(site);
             if (!callee || site->getActualParms().empty() || !modules->hasLLVMValue(callee)) {
                 continue;
             }
@@ -73,14 +77,53 @@ private:
             const auto self = graph_.findSvf(SvfId{site->getActualParms()[0]->getId()});
             if (cls && detail::relevant(cls->getVTable()) && self) {
                 constructed.emplace(self->value, node(cls->getVTable()));
+                if (!ownThis(site)) sites.emplace(self->value, site);
             }
         }
         for (auto& edge : graph_.edges()) {
             if (edge.label != Label::New) continue;
             if (const auto it = constructed.find(edge.dst.value); it != constructed.end()) {
                 edge.type = it->second;
+                sites.erase(edge.dst.value);
             }
         }
+        // A constructor call on storage that is no allocation (placement new, e.g. a pool's slot)
+        // creates the object: a polymorphic object exists only after its constructor runs, and
+        // the storage's other users may not access it through another type.
+        for (const auto& [self, site] : sites) {
+            Node info;
+            info.kind = NodeKind::Obj;
+            info.name = graph_.nodes()[constructed.at(self).value].name;
+            info.function = llvm::demangle(site->getCaller()->getName());
+            info.sourceLocation = site->getSourceLoc();
+            info.line = detail::sourceLine(info.sourceLocation);
+            const auto object = graph_.addNode(info);
+            graph_.addEdge({object, NodeId{self}, Label::New, std::nullopt, std::nullopt,
+                            CallDir::None, constructed.at(self)});
+        }
+    }
+
+    // The function a call through an alias runs, which SVF does not resolve: clang emits a
+    // complete-object constructor (C1) as an alias of the base-object one (C2) when it is defined
+    // out of line.
+    static const FunObjVar* aliasedCallee(const CallICFGNode* site) {
+        auto* modules = LLVMModuleSet::getLLVMModuleSet();
+        const auto* call = llvm::dyn_cast_or_null<llvm::CallBase>(modules->getLLVMValue(site));
+        if (!call || !call->getCalledOperand()) return nullptr;
+        const auto* fn =
+            llvm::dyn_cast<llvm::Function>(call->getCalledOperand()->stripPointerCastsAndAliases());
+        return fn ? modules->getFunObjVar(fn) : nullptr;
+    }
+
+    // Whether the constructor call constructs a part of the caller's own `this` (a base class or
+    // a member), which the caller's object already is.
+    static bool ownThis(const CallICFGNode* site) {
+        const auto* call = llvm::dyn_cast_or_null<llvm::CallBase>(
+            LLVMModuleSet::getLLVMModuleSet()->getLLVMValue(site));
+        if (!call || call->arg_empty()) return false;
+        const auto* self = llvm::dyn_cast<llvm::Argument>(
+            llvm::getUnderlyingObject(call->getArgOperand(0)));
+        return self && self->getArgNo() == 0 && cppUtil::isConstructor(self->getParent());
     }
 
     // Methods the virtual call may run, each with the classes (by vtable) selecting it.

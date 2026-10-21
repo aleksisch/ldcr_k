@@ -1,0 +1,3 @@
+# Paper Fig. 5: one context, two receiver objects, each reaching only its own target.
+E::foo::this -> e1
+F::foo::this -> f1

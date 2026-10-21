@@ -64,6 +64,7 @@ struct Edge {
     std::optional<CallSiteId> callSite;
     CallDir dir = CallDir::None;
     std::optional<NodeId> type; // new[T], dispatch[T]: the vtable object of class T
+    bool reversed = false;      // the edge walked backwards (addReversedEdges)
 };
 
 struct CallTarget {
