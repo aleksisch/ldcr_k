@@ -11,6 +11,10 @@ namespace ldc::grammar {
 // `pag`.
 cfl::Grammar ld(const frontend::SimplifiedPAG& pag);
 
+// L_D over addObjectFields' PAG (--cpp-heap): interior pointers field-sensitive through objects
+// at offsets, and stores and loads meeting in heap cells.
+cfl::Grammar ldCpp(const frontend::SimplifiedPAG& pag);
+
 // L_C: calls and returns as parentheses of their call site, over the PAG's terminals
 // (Cfl.h). S derives (u, v) if a value flows from u to v along a realizable path.
 cfl::Grammar lc();

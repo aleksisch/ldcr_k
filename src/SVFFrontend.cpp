@@ -102,6 +102,8 @@ private:
             info.sourceName = it->second.name;
         info.sourceLocation = value->getSourceLoc();
         info.line = sourceLine(info.sourceLocation);
+        if (const auto* object = SVFUtil::dyn_cast<BaseObjVar>(value))
+            info.fieldLimit = object->getMaxFieldOffsetLimit();
         return graph_.addNode(info);
     }
 

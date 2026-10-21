@@ -12,6 +12,9 @@ std::variant<CommandLine, int> parseCommandLine(int argc, char** argv) {
     app.add_option("--program-dot", options.programDot, "Write the simplified PAG to a DOT file")
         ->check(path);
     app.add_flag("--points-to", options.pointsTo, "Solve points-to facts (L_D and L_R)");
+    app.add_flag("--cpp-heap", options.cppHeap,
+                 "Model C++ memory: objects at field offsets, heap cells (field-sensitive interior "
+                 "pointers)");
     app.add_flag("--match-calls", options.matchCalls,
                  "Keep only facts with a realizable path (calls and returns match, L_C)");
     app.add_option("--facts", options.facts, "Write the points-to facts to a file")->check(path);
@@ -25,6 +28,7 @@ std::variant<CommandLine, int> parseCommandLine(int argc, char** argv) {
         app.parse(argc, argv);
     } catch (const CLI::ParseError& error) { return app.exit(error); }
     if (options.matchCalls) options.pointsTo = true;
+    if (options.cppHeap) options.pointsTo = true;
     options.svfSolver = solver == "svf";
     return options;
 }

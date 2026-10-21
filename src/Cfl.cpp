@@ -76,6 +76,21 @@ Graph terminals(const frontend::SimplifiedPAG& pag) {
             break;
         }
         case Label::Dispatch: add("dispatch" + type + r); break;
+        case Label::Shift: add("shift" + type + r, field + 2); break;
+        case Label::Cell: add("cell" + r, field); break;
+        case Label::StarCell:
+            if (e.field)
+                add("starCell" + r, field);
+            else
+                add("starCellAny" + r);
+            break;
+        case Label::Hub:
+            if (e.field)
+                add("hub" + r, field);
+            else
+                add("hubAny" + r);
+            break;
+        case Label::CellHub: add("cellHub" + r); break;
         }
         const bool call = e.callSite && (e.label == Label::Dispatch || e.dir == CallDir::Enter);
         const bool ret = e.callSite && e.dir == CallDir::Exit;

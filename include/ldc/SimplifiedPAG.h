@@ -42,8 +42,8 @@ namespace ldc::frontend {
 // Unknown field offset; an empty optional means the edge has no field.
 inline constexpr FieldOffset kAnyField{-2};
 
-enum class NodeKind { Var, Obj, Receiver };
-enum class Label { New, Assign, Store, Load, Gep, Dispatch };
+enum class NodeKind { Var, Obj, Receiver, Cell, Hub };
+enum class Label { New, Assign, Store, Load, Gep, Dispatch, Shift, Cell, StarCell, Hub, CellHub };
 enum class CallDir { None, Enter, Exit, DispatchEnter, DispatchExit };
 
 struct Node {
@@ -54,6 +54,12 @@ struct Node {
     std::string sourceName;     // variable name recovered from LLVM debug records, if available
     std::string sourceLocation; // original SVF location, including file information if available
     int line = 0;               // 0 when unavailable
+    // Objects: field offsets at or beyond it are not distinguished (SVF's limit after Andersen;
+    // 0 makes the object field-insensitive).
+    std::optional<std::uint32_t> fieldLimit;
+    // An object at an offset, a heap cell or a hub (addObjectFields): its object and offset.
+    std::optional<NodeId> base;
+    std::int32_t offset = 0;
 };
 
 struct Edge {

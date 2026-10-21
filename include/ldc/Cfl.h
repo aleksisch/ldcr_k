@@ -15,6 +15,9 @@
 //   gep_i (i the field + 2, 0 for an unknown field), store_i / load_i (i the field), storeAny /
 //   loadAny (an unknown field), storeArg_i / loadArg_i (a synthetic argument or result field,
 //   i one per (field, call site)), dispatch<T>;
+//   for the C++ heap model (addObjectFields): shift<T>_i (i the gep field + 2, T the class of the
+//   object it leads to, none for an object at an offset), cell_i, starCell_i, starCellAny, hub_i,
+//   hubAny (i the field) and cellHub;
 //   a reversed edge (Edge::reversed) gets "_r" after the name;
 // - by its call site c: call_i for a call or a dispatch at c, ret_i for a return, bo_i and bc_i for
 //   the start and the end of a dispatch excursion (DispatchEnter, DispatchExit), e otherwise; a

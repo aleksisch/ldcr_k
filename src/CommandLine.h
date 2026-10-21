@@ -14,6 +14,8 @@ struct CommandLine {
     std::string source;    // C++ source whose `// <label>` comments name allocation sites
     // Intersect with L_C.
     bool matchCalls = false;
+    // The C++ heap model: objects at offsets and heap cells.
+    bool cppHeap = false;
     // SVF's CFL solver instead of LAGraph.
     bool svfSolver = false;
 };

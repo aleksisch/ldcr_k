@@ -107,6 +107,12 @@ receiver opens, and a second edge from the receiver to its per-site copy, used
 only by arguments, or the result load closes. The languages are intersected at
 the endpoints: each may use its own path.
 
+`--cpp-heap` models C++ memory more closely: every object gets a node per field
+offset its address computations reach (up to SVF's field limit for the object),
+and stores and loads meet in a heap cell per object and absolute field. Pointers
+into the middle of an object then stay field-sensitive; without it they may
+touch any field of their object.
+
 ## Library
 
 Link against `ldc_frontend` and include [ldc/SVFFrontend.h](include/ldc/SVFFrontend.h).

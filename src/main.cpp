@@ -46,13 +46,22 @@ int main(int argc, char** argv) {
                 grown |= functions.insert(llvm::demangle(callee)).second;
     }
     auto pag = ldc::postProcessPAG(result.graph, functions);
+    if (options.cppHeap) ldc::addObjectFields(pag);
     auto grammar = ldc::grammar::ld(pag);
+    if (options.cppHeap) grammar = ldc::grammar::ldCpp(pag);
     auto solved = ldc::cfl::solve(pag, grammar, cfl);
     ldc::PointsTo facts;
     for (const auto& [object, node] : solved["S"])
         if (pag.nodes()[object].kind == ldc::frontend::NodeKind::Obj &&
             pag.nodes()[node].kind == ldc::frontend::NodeKind::Var)
             facts[node].insert(object);
+    // An object at an offset (--cpp-heap) stands for its object.
+    for (auto& [variable, objects] : facts) {
+        std::set<std::uint32_t> whole;
+        for (auto o : objects)
+            whole.insert(pag.nodes()[o].base.value_or(ldc::frontend::NodeId{o}).value);
+        objects = std::move(whole);
+    }
     // L_R, and L_C with --match-calls: a fact is kept if its object reaches its variable in each of
     // them (at the endpoints: each language may use its own path).
     std::vector<ldc::cfl::Language> languages{{ldc::grammar::lr(), "S"}};

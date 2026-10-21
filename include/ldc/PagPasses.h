@@ -17,4 +17,10 @@ namespace ldc {
 frontend::SimplifiedPAG postProcessPAG(const frontend::SimplifiedPAG& pag,
                                        const std::set<std::string>& functions);
 
+// The C++ heap model, for grammar::ldCpp (--cpp-heap): an object at every offset its geps reach,
+// up to the object's field limit (SVF's); shift edges from the object at offset a + f to the one
+// at a (f the gep field); a heap cell per object and absolute field, where stores and loads meet;
+// and a hub per object for unknown fields. The added edges are also added reversed.
+void addObjectFields(frontend::SimplifiedPAG& pag);
+
 } // namespace ldc

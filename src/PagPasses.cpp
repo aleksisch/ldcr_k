@@ -1,6 +1,8 @@
 #include "ldc/PagPasses.h"
 
+#include <algorithm>
 #include <map>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -9,6 +11,7 @@ namespace ldc {
 using frontend::CallDir;
 using frontend::CallSiteId;
 using frontend::Edge;
+using frontend::FieldOffset;
 using frontend::Label;
 using frontend::NodeId;
 using frontend::NodeKind;
@@ -101,6 +104,90 @@ SimplifiedPAG postProcessPAG(const SimplifiedPAG& pag, const std::set<std::strin
     splitDispatchedThis(result);
     addReversedEdges(result);
     return result;
+}
+
+void addObjectFields(SimplifiedPAG& pag) {
+    constexpr std::int32_t kAny = frontend::kAnyField.value;
+    constexpr std::uint32_t kFieldLimit = 512; // SVF's MaxFieldLimit, for objects without one
+    std::set<std::int32_t> gepFields, accessFields;
+    std::map<std::uint32_t, std::optional<NodeId>> objects; // object -> its class's vtable
+    for (const auto& e : pag.edges()) {
+        if (e.reversed) continue;
+        if (e.label == Label::Gep) gepFields.insert(e.field ? e.field->value : kAny);
+        if ((e.label == Label::Store || e.label == Label::Load) && e.field && e.field->value >= 0)
+            accessFields.insert(e.field->value);
+        if (e.label == Label::New) objects.emplace(e.src.value, e.type);
+    }
+    const auto added = pag.edges().size();
+    for (const auto& [object, type] : objects) {
+        const auto original = pag.nodes()[object];
+        const auto limit = std::min(original.fieldLimit.value_or(kFieldLimit), kFieldLimit);
+        // An offset or a field from it, `*` at or beyond the object's field limit.
+        const auto shift = [&](std::int32_t offset, std::int32_t field) {
+            if (offset == kAny || field == kAny) return kAny;
+            return offset + field < static_cast<std::int32_t>(limit) ? offset + field : kAny;
+        };
+        const auto addNode = [&](NodeKind kind, std::int32_t offset, const std::string& suffix) {
+            auto node = original;
+            node.kind = kind;
+            node.svfId.reset();
+            node.base = NodeId{object};
+            node.offset = offset;
+            node.name += suffix;
+            return pag.addNode(node);
+        };
+        const auto name = [&](std::int32_t offset) {
+            return offset == kAny ? std::string("*") : std::to_string(offset);
+        };
+
+        // The offsets its geps can reach.
+        std::map<std::int32_t, NodeId> at{{0, NodeId{object}}};
+        for (std::vector<std::int32_t> work{0}; !work.empty();) {
+            const auto offset = work.back();
+            work.pop_back();
+            for (auto f : gepFields)
+                if (const auto to = shift(offset, f); !at.count(to)) {
+                    at.emplace(to, addNode(NodeKind::Obj, to, "@" + name(to)));
+                    work.push_back(to);
+                }
+        }
+        for (const auto& [offset, node] : at)
+            for (auto f : gepFields)
+                if (auto it = at.find(shift(offset, f)); it != at.end())
+                    pag.addEdge({it->second, node, Label::Shift, FieldOffset{f}, std::nullopt,
+                                 CallDir::None, offset == 0 ? type : std::nullopt});
+
+        // Cells: a store through a pointer to (o, a) at field g and a load at (o, a') field g'
+        // meet in the cell (o, a + g) when a + g == a' + g'.
+        const auto star = addNode(NodeKind::Cell, kAny, ".cell*");
+        const auto hub = addNode(NodeKind::Hub, 0, ".hub");
+        std::map<std::int32_t, NodeId> cells{{kAny, star}};
+        for (const auto& [offset, node] : at) {
+            for (auto g : accessFields) {
+                const auto absolute = shift(offset, g);
+                auto it = cells.find(absolute);
+                if (it == cells.end())
+                    it = cells
+                             .emplace(absolute,
+                                      addNode(NodeKind::Cell, absolute, ".cell" + name(absolute)))
+                             .first;
+                pag.addEdge({it->second, node, Label::Cell, FieldOffset{g}});
+                if (absolute != kAny)
+                    pag.addEdge({star, node, Label::StarCell, FieldOffset{g}});
+                else
+                    pag.addEdge({hub, node, Label::Hub, FieldOffset{g}});
+            }
+            pag.addEdge({star, node, Label::StarCell});
+            pag.addEdge({hub, node, Label::Hub});
+        }
+        for (const auto& [absolute, cell] : cells) pag.addEdge({cell, hub, Label::CellHub});
+    }
+    for (auto i = added, count = pag.edges().size(); i < count; ++i) {
+        auto e = pag.edges()[i];
+        std::swap(e.src, e.dst);
+        e.reversed = true;
+        pag.addEdge(e);
+    }
 }
 
 } // namespace ldc

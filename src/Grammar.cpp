@@ -142,6 +142,53 @@ cfl::Grammar ld(const SimplifiedPAG& pag) {
     return rule.grammar;
 }
 
+// L_D over addObjectFields' PAG: an object at an offset (class u) flows to w if the object at the
+// offset before the gep flows to the gep's source (GPO); a store and a load meet in a heap cell
+// (o, a + f) of the object both bases point to (HEAP), an unknown field through the object's star
+// cell or its hub.
+cfl::Grammar ldCpp(const SimplifiedPAG& pag) {
+    auto classes = classesOf(pag);
+    classes.types.insert(std::nullopt);
+    Rules rule;
+    flowsto(rule, classes, "HEAP");
+    for (const auto& type : classes.types) {
+        const auto c = className(type), shift = "shift" + typeName(type);
+        rule("GPO" + c + "_i", "FT" + c, "gep_i");
+        rule("GPR" + c + "_i", "gep_r_i", "FTR" + c);
+        rule("FTu", shift + "_i", "GPO" + c + "_i");
+        rule("FTRu", "GPR" + c + "_i", shift + "_r_i");
+    }
+    rule("HEAP", "STCELL", "LDCELL");
+    rule("STCELL", "STO_i", "cell_r_i");
+    rule("STCELL", "STOS", "starCellAny_r");
+    rule("LDCELL", "cell_i", "LDO_i");
+    rule("LDCELL", "starCell_i", "LDO_i");
+    rule("LDCELL", "cellHub", "HUBLD");
+    rule("HUBLD", "hub_i", "LDO_i");
+    rule("HUBLD", "hubAny", "LDOS");
+    rule("HEAPR", "LDCELLR", "STCELLR");
+    rule("STCELLR", "cell_i", "STOR_i");
+    rule("STCELLR", "starCellAny", "STORS");
+    rule("LDCELLR", "LDOR_i", "cell_r_i");
+    rule("LDCELLR", "LDOR_i", "starCell_r_i");
+    rule("LDCELLR", "HUBLDR", "cellHub_r");
+    rule("HUBLDR", "LDOR_i", "hub_r_i");
+    rule("HUBLDR", "LDORS", "hubAny_r");
+    for (const auto& type : classes.types) {
+        const auto ft = "FT" + className(type), ftr = "FTR" + className(type);
+        rule("STO_i", "store_i", ftr);
+        rule("STOS", "storeAny", ftr);
+        rule("LDO_i", ft, "load_i");
+        rule("LDOS", ft, "loadAny");
+        rule("STOR_i", ft, "store_r_i");
+        rule("STORS", ft, "storeAny_r");
+        rule("LDOR_i", "load_r_i", ftr);
+        rule("LDORS", "loadAny_r", ftr);
+    }
+    syntheticFields(rule, "HEAP");
+    return rule.grammar;
+}
+
 cfl::Grammar lc() {
     // A realizable path (S) has unmatched returns first (P), then unmatched calls (R); M is
     // balanced. Dispatch boundaries are plain steps (E) for L_C.

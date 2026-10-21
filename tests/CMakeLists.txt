@@ -49,5 +49,9 @@ foreach(src IN LISTS points_to_sources)
     add_test(NAME "points_to.${name}.calls"
              COMMAND sh -c "$<TARGET_FILE:ldc> --match-calls --facts '${facts}' --source '${src}' '${ll}' >/dev/null && sh '${CMAKE_CURRENT_SOURCE_DIR}/expect.sh' '${facts}' '${calls}'")
   endif()
+  # With the C++ heap model (--cpp-heap), against the same expected facts.
+  set(facts "${CMAKE_CURRENT_BINARY_DIR}/${name}.cpp_heap.facts")
+  add_test(NAME "points_to.${name}.cpp_heap"
+           COMMAND sh -c "$<TARGET_FILE:ldc> --cpp-heap --facts '${facts}' --source '${src}' '${ll}' >/dev/null && sh '${CMAKE_CURRENT_SOURCE_DIR}/expect.sh' '${facts}' '${CMAKE_CURRENT_SOURCE_DIR}/expected/${name}.txt'")
 endforeach()
 add_custom_target(points_to_ir ALL DEPENDS ${points_to_ir})

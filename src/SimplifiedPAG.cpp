@@ -8,7 +8,8 @@ std::size_t std::hash<ldc::frontend::SvfId>::operator()(ldc::frontend::SvfId id)
 
 namespace ldc::frontend {
 namespace {
-const char* const labels[] = {"new", "assign", "store", "load", "gep", "dispatch"};
+const char* const labels[] = {"new",   "assign", "store",    "load", "gep",    "dispatch",
+                              "shift", "cell",   "starCell", "hub",  "cellHub"};
 std::string escapeDot(const std::string& text) {
     std::string out;
     for (auto c : text) {
