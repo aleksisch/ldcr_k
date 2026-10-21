@@ -18,8 +18,16 @@ target_compile_features(ldc_frontend PUBLIC cxx_std_20)
 target_include_directories(ldc_frontend PUBLIC include)
 target_link_libraries(ldc_frontend PUBLIC SVF::SvfLLVM SVF::SvfCore)
 
+# Points-to as CFL reachability: the languages' graphs and grammars, and the solver.
+add_library(ldc_cfl src/PagPasses.cpp)
+target_link_libraries(ldc_cfl PUBLIC ldc_frontend)
+target_sources(ldc_cfl PRIVATE src/Grammar.cpp)
+target_sources(ldc_cfl PRIVATE src/Cfl.cpp src/CflSvf.cpp)
+
 add_executable(ldc src/main.cpp src/CommandLine.cpp)
 target_link_libraries(ldc PRIVATE ldc_frontend CLI11::CLI11)
+target_sources(ldc PRIVATE src/Facts.cpp)
+target_link_libraries(ldc PRIVATE ldc_cfl)
 
 include(cmake/LdcIR.cmake)
 

@@ -1,0 +1,2 @@
+# C::foo is a CHA target of c3 but no C object reaches x, so its `this` stays empty.
+C::foo::this ->

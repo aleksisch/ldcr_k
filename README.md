@@ -59,6 +59,34 @@ names. DOT output includes pointer-flow edges, call sites, and source metadata.
 GEP chains are folded into load/store field offsets; escaping field addresses
 retain explicit GEP edges.
 
+## Points-to facts
+
+```sh
+build/ldc --points-to example.ll
+build/ldc --facts facts.txt --source example.cpp example.ll
+```
+
+`--points-to` solves field- and dispatch-sensitive points-to facts (L_D, with
+L_R pairing each virtual call's arguments with the instance it dispatched to),
+without calling contexts, as CFL reachability, and prints Σ|pts| over
+variables. `--facts` writes one `var -> obj` line per fact, with variables named
+`<function>::<name>`; `--source` names objects by the `// <label>` comment on
+their allocation line.
+
+`--match-calls` keeps only facts that also have a realizable value-flow path
+(L_C: every return goes back to its call), also solved as CFL reachability. Its
+graph adds every edge reversed, a reversed call being a return, so that a flow
+through the heap can go from a store's base back to the object and on to a
+load's base.
+
+The facts are also intersected with L_R: a fact is kept if it has a path whose
+dispatch excursions close at the call site they opened at and return to the
+calling context they left. Its graph is L_C's, with the start and the end of
+each dispatch marked (the paper's boxed labels): the argument stored into the
+receiver opens, and a second edge from the receiver to its per-site copy, used
+only by arguments, or the result load closes. The languages are intersected at
+the endpoints: each may use its own path.
+
 ## Library
 
 Link against `ldc_frontend` and include [ldc/SVFFrontend.h](include/ldc/SVFFrontend.h).
