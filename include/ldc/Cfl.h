@@ -33,6 +33,8 @@ using Pairs = std::vector<std::pair<std::uint32_t, std::uint32_t>>;
 struct Options {
     // The first solver is the default.
     enum class Solver {
+        // LAGraph_CFL_reachability_adv
+        LAGraph,
         // SVF's CFLSolver
         Svf,
     };

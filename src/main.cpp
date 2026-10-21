@@ -35,6 +35,7 @@ int main(int argc, char** argv) {
     if (!options.pointsTo && options.facts.empty()) return ok ? 0 : 1;
 
     ldc::cfl::Options cfl;
+    if (options.svfSolver) cfl.solver = ldc::cfl::Options::Solver::Svf;
     const auto start = std::chrono::steady_clock::now();
     // L_D over the functions SVF's call graph (Andersen's) reaches from main.
     std::set<std::string> functions{"", "main"};

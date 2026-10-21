@@ -14,6 +14,8 @@ struct CommandLine {
     std::string source;    // C++ source whose `// <label>` comments name allocation sites
     // Intersect with L_C.
     bool matchCalls = false;
+    // SVF's CFL solver instead of LAGraph.
+    bool svfSolver = false;
 };
 
 // Parses the arguments, or prints help or an error and returns the exit code.

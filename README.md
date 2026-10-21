@@ -37,6 +37,26 @@ SVF was built against, including its `clang++` and `opt`. Build before running
 `test`; the test target does not compile binaries or IR fixtures.
 [CI](.github/workflows/ci.yml) runs the same build and tests.
 
+CFL reachability is solved by [LAGraph](https://github.com/SparseLinearAlgebra/LAGraph)
+(Git submodule) on [SuiteSparse:GraphBLAS](https://github.com/DrTimothyAldenDavis/GraphBLAS).
+Fetch the submodule and build GraphBLAS once, with a C compiler that has OpenMP:
+
+```sh
+git submodule update --init third_party/LAGraph
+git clone --depth=1 --branch v10.5.1 https://github.com/DrTimothyAldenDavis/GraphBLAS.git
+CC=gcc cmake -S GraphBLAS -B GraphBLAS/build -DGRAPHBLAS_COMPACT=1 \
+  -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$HOME/.local/graphblas"
+cmake --build GraphBLAS/build --parallel && cmake --install GraphBLAS/build
+```
+
+Then configure as above with the same C compiler and GraphBLAS:
+
+```sh
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=gcc \
+  -DSVF_DIR="$SVF_DIR" -DLLVM_DIR="$LLVM_DIR" -DZ3_DIR="$Z3_DIR" \
+  -DGraphBLAS_ROOT="$HOME/.local/graphblas"
+```
+
 ## Usage
 
 Compile a source file to LLVM IR, then analyze it:

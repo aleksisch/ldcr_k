@@ -15,6 +15,9 @@ std::variant<CommandLine, int> parseCommandLine(int argc, char** argv) {
     app.add_flag("--match-calls", options.matchCalls,
                  "Keep only facts with a realizable path (calls and returns match, L_C)");
     app.add_option("--facts", options.facts, "Write the points-to facts to a file")->check(path);
+    std::string solver = "lagraph";
+    app.add_option("--cfl-solver", solver, "CFL-reachability solver: lagraph or svf")
+        ->check(CLI::IsMember({"lagraph", "svf"}));
     app.add_option("--source", options.source, "Name objects by `// <label>` source comments")
         ->check(CLI::ExistingFile)
         ->needs("--facts");
@@ -22,6 +25,7 @@ std::variant<CommandLine, int> parseCommandLine(int argc, char** argv) {
         app.parse(argc, argv);
     } catch (const CLI::ParseError& error) { return app.exit(error); }
     if (options.matchCalls) options.pointsTo = true;
+    options.svfSolver = solver == "svf";
     return options;
 }
 

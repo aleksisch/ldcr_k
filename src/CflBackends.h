@@ -25,5 +25,6 @@ struct Graph {
 
 // cfl::solve's backends, for a grammar without rules between nonterminals.
 std::map<std::string, Pairs> solveWithSvf(const Graph& graph, const Grammar& grammar);
+std::map<std::string, Pairs> solveWithLAGraph(const Graph& graph, const Grammar& grammar);
 
 } // namespace ldc::cfl

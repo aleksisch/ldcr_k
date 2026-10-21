@@ -53,6 +53,7 @@ void check(const Options& options) {
 }
 
 int main() {
+    check({Options::Solver::LAGraph});
     check({Options::Solver::Svf});
     return 0;
 }

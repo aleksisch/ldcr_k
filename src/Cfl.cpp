@@ -98,6 +98,7 @@ std::map<std::string, Pairs> solve(const frontend::SimplifiedPAG& pag, const Gra
     const auto graph = terminals(pag);
     const auto rules = withoutUnitRules(grammar);
     switch (options.solver) {
+    case Options::Solver::LAGraph: return solveWithLAGraph(graph, rules);
     case Options::Solver::Svf: return solveWithSvf(graph, rules);
     }
     throw std::invalid_argument("Unknown CFL solver");
