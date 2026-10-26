@@ -113,6 +113,24 @@ and stores and loads meet in a heap cell per object and absolute field. Pointers
 into the middle of an object then stay field-sensitive; without it they may
 touch any field of their object.
 
+## Paths
+
+```sh
+build/ldc --pag-dot pag.dot --pag-dot-code example.cpp --path i1:main::p --lang DCR example.ll
+c++filt < pag.dot | dot -Tpng -o pag.png
+```
+
+`--pag-dot` draws the PAG the languages are solved on (without its reversed
+edges), each edge as the tuple of its two labels in the paper, `(store[1], ⟦ĉ3⟧)`;
+`--pag-dot-code` shows the source with line numbers at the top right. The
+frontend's edges that the PAG passes removed (functions not reached from `main`,
+edges moved to `this#c`) are drawn too, gray and dashed.
+`--path from:to` (repeatable) finds a path from an object to a variable
+(points-to) or between two variables (alias), named as in `--facts`, in each
+language of `--lang` on its own (any of D, C, R; D by default). Each path is
+printed and drawn over the PAG: its edges in the query's color, with the
+numbered steps of each language (`D3`, `C2`, `←` for an edge walked backwards).
+
 ## Library
 
 Link against `ldc_frontend` and include [ldc/SVFFrontend.h](include/ldc/SVFFrontend.h).

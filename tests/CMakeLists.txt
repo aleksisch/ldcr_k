@@ -55,3 +55,13 @@ foreach(src IN LISTS points_to_sources)
            COMMAND sh -c "$<TARGET_FILE:ldc> --cpp-heap --facts '${facts}' --source '${src}' '${ll}' >/dev/null && sh '${CMAKE_CURRENT_SOURCE_DIR}/expect.sh' '${facts}' '${CMAKE_CURRENT_SOURCE_DIR}/expected/${name}.txt'")
 endforeach()
 add_custom_target(points_to_ir ALL DEPENDS ${points_to_ir})
+
+# Paths of --path queries: i1 reaches m's p in each language, i2 does not in L_D.
+set(fig8_ir "${CMAKE_CURRENT_BINARY_DIR}/fig8.ll")
+add_test(NAME path.fig8
+         COMMAND sh -c "$<TARGET_FILE:ldc> --pag-dot '${CMAKE_CURRENT_BINARY_DIR}/fig8.pag.dot' --pag-dot-code '${CMAKE_CURRENT_SOURCE_DIR}/cpp/fig8.cpp' --path i1:H::m::p --lang DCR '${fig8_ir}' | grep -c ' in L_[DCR]:$' | grep -qx 3")
+add_test(NAME path.fig8.none
+         COMMAND sh -c "$<TARGET_FILE:ldc> --pag-dot-code '${CMAKE_CURRENT_SOURCE_DIR}/cpp/fig8.cpp' --pag-dot /dev/null --path i2:H::m::p '${fig8_ir}' | grep -qx 'Path i2:H::m::p in L_D: none'")
+# --pag-dot draws dead edges: the dispatch edges to `this` that splitDispatchedThis moved to this#c.
+add_test(NAME pag_dot.dead
+         COMMAND sh -c "$<TARGET_FILE:ldc> --pag-dot /dev/stdout '${fig8_ir}' | grep -q 'style=dashed, label=\"(dispatch'")

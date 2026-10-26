@@ -56,6 +56,7 @@ Graph terminals(const frontend::SimplifiedPAG& pag) {
         const auto type = e.type ? std::to_string(e.type->value) : "";
         const auto add = [&](const std::string& label, std::int32_t index = -1) {
             graph.edges.push_back({e.src.value, e.dst.value, label, index});
+            graph.edges.back().pagEdge = static_cast<std::size_t>(&e - pag.edges().data());
         };
         switch (e.label) {
         case Label::New: add("new" + type + r); break;
@@ -137,6 +138,18 @@ Pairs solve(const frontend::SimplifiedPAG& pag, const std::vector<Language>& lan
         result = std::move(both);
     }
     return result;
+}
+
+std::vector<std::optional<std::vector<std::size_t>>> paths(const frontend::SimplifiedPAG& pag,
+                                                           const Grammar& grammar,
+                                                           const std::string& start,
+                                                           const Pairs& queries) {
+    const auto graph = terminals(pag);
+    auto found = findPaths(graph, grammar, start, queries);
+    for (auto& path : found)
+        if (path)
+            for (auto& edge : *path) edge = graph.edges[edge].pagEdge;
+    return found;
 }
 
 } // namespace ldc::cfl

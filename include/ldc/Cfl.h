@@ -2,8 +2,10 @@
 
 #include "ldc/SimplifiedPAG.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -58,5 +60,13 @@ struct Language {
 // The pairs (u, v) reachable in every language, sorted.
 Pairs solve(const frontend::SimplifiedPAG& pag, const std::vector<Language>& languages,
             const Options& options = {});
+
+// For each query (u, v), a path u ~> v derived from `start`, as the PAG edges it walks in order
+// (reversed ones included), or nullopt. The path of a fact's first derivation in a worklist
+// solver of our own: short, not necessarily the shortest.
+std::vector<std::optional<std::vector<std::size_t>>> paths(const frontend::SimplifiedPAG& pag,
+                                                           const Grammar& grammar,
+                                                           const std::string& start,
+                                                           const Pairs& queries);
 
 } // namespace ldc::cfl

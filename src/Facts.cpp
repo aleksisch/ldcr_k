@@ -52,4 +52,8 @@ void writeFacts(std::ostream& out, const frontend::SimplifiedPAG& graph, const P
     for (const auto& line : lines) out << line << "\n";
 }
 
+std::vector<std::string> nodeNames(const frontend::SimplifiedPAG& graph, const std::string& source) {
+    return nodeTexts(graph, source);
+}
+
 } // namespace ldc

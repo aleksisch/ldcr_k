@@ -18,6 +18,12 @@ struct CommandLine {
     bool cppHeap = false;
     // SVF's CFL solver instead of LAGraph.
     bool svfSolver = false;
+    // The PAG right before solving, as DOT, with this source file at the top right.
+    std::string pagDot;
+    std::string pagDotCode;
+    // `from:to` queries, by the names of --facts, and the languages to find their paths in.
+    std::vector<std::string> paths;
+    std::string languages = "D";
 };
 
 // Parses the arguments, or prints help or an error and returns the exit code.

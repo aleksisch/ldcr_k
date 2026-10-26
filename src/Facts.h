@@ -7,6 +7,7 @@
 #include <ostream>
 #include <set>
 #include <string>
+#include <vector>
 
 namespace ldc {
 
@@ -17,5 +18,8 @@ using PointsTo = std::map<std::uint32_t, std::set<std::uint32_t>>;
 // `<function>::<source name>`, objects by the `// <label>` comment on their line in `source`.
 void writeFacts(std::ostream& out, const frontend::SimplifiedPAG& graph, const PointsTo& facts,
                 const std::string& source);
+
+// The names writeFacts gives the nodes, by node index.
+std::vector<std::string> nodeNames(const frontend::SimplifiedPAG& graph, const std::string& source);
 
 } // namespace ldc

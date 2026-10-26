@@ -5,12 +5,15 @@
 #include "ldc/SVFFrontend.h"
 #include "CommandLine.h"
 #include "Facts.h"
+#include "PagDot.h"
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <llvm/Demangle/Demangle.h>
 #include <fstream>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <variant>
 #include <vector>
@@ -49,6 +52,77 @@ int main(int argc, char** argv) {
     if (options.cppHeap) ldc::addObjectFields(pag);
     auto grammar = ldc::grammar::ld(pag);
     if (options.cppHeap) grammar = ldc::grammar::ldCpp(pag);
+    // The --path queries: a path in each language on its own, printed and drawn in --pag-dot.
+    std::vector<ldc::DrawnPath> drawn;
+    std::string legend;
+    if (!options.paths.empty()) {
+        const auto names =
+            ldc::nodeNames(pag, options.source.empty() ? options.pagDotCode : options.source);
+        const auto find = [&](const std::string& name) -> std::optional<std::uint32_t> {
+            for (std::uint32_t id = 0; id < names.size(); ++id)
+                if (names[id] == name) return id;
+            std::cerr << "No node named " << name << "\n";
+            return std::nullopt;
+        };
+        const char* const colors[] = {"red",    "blue",  "darkgreen", "darkorange",
+                                      "purple", "brown", "magenta",   "teal"};
+        const bool aliasX = std::any_of(grammar.begin(), grammar.end(),
+                                        [](const auto& rule) { return rule.lhs == "ALIASX"; });
+        for (char language : options.languages) {
+            auto languageGrammar = grammar;
+            if (language == 'C') languageGrammar = ldc::grammar::lc();
+            if (language == 'R') languageGrammar = ldc::grammar::lr();
+            for (std::size_t q = 0; q < options.paths.size(); ++q) {
+                // from:to, split at a ':' that is not part of a "::".
+                const auto& query = options.paths[q];
+                std::size_t colon = std::string::npos;
+                for (std::size_t i = 0; i < query.size() && colon == std::string::npos; ++i)
+                    if (query[i] == ':' && (i == 0 || query[i - 1] != ':') &&
+                        (i + 1 == query.size() || query[i + 1] != ':'))
+                        colon = i;
+                const auto from = colon == std::string::npos ? std::nullopt
+                                                             : find(query.substr(0, colon));
+                const auto to = colon == std::string::npos ? std::nullopt
+                                                           : find(query.substr(colon + 1));
+                if (!from || !to) {
+                    std::cerr << "Bad --path " << query << "\n";
+                    ok = false;
+                    continue;
+                }
+                // An object and a variable: points-to (S); two variables: alias.
+                const bool alias = pag.nodes()[*from].kind != ldc::frontend::NodeKind::Obj;
+                const std::string start =
+                    language == 'D' && alias ? (aliasX ? "ALIASX" : "ALIAS") : "S";
+                const auto found = ldc::cfl::paths(pag, languageGrammar, start, {{*from, *to}});
+                std::cout << "Path " << query << " in L_" << language << ":";
+                if (!found[0]) {
+                    std::cout << " none\n";
+                    continue;
+                }
+                std::cout << "\n";
+                for (auto e : *found[0]) {
+                    const auto& edge = pag.edges()[e];
+                    std::cout << "  " << names[edge.src.value] << " --"
+                              << ldc::edgeTuple(pag, edge) << "--> " << names[edge.dst.value]
+                              << "\n";
+                }
+                const auto* color = colors[q % std::size(colors)];
+                drawn.push_back({*found[0], color, std::string(1, language)});
+                if (language == options.languages.front())
+                    legend += std::string(color) + ": " + query + "\n";
+            }
+        }
+        legend += "steps: D1, C1, R1, ... in L_D, L_C, L_R; ← walks an edge backwards\n";
+    }
+    if (!options.pagDot.empty()) {
+        std::ofstream out(options.pagDot);
+        ldc::writePagDot(out, pag, options.pagDotCode, legend, drawn, &result.graph);
+        out.close();
+        if (!out) {
+            std::cerr << "Cannot write PAG: " << options.pagDot << "\n";
+            ok = false;
+        }
+    }
     auto solved = ldc::cfl::solve(pag, grammar, cfl);
     ldc::PointsTo facts;
     for (const auto& [object, node] : solved["S"])
