@@ -21,11 +21,36 @@ std::variant<CommandLine, int> parseCommandLine(int argc, char** argv) {
     app.add_option("--source", options.source, "Name objects by `// <label>` source comments")
         ->check(CLI::ExistingFile)
         ->needs("--facts");
+    app.add_option("--pag-dot", options.pagDot, "Write the PAG right before solving to a DOT file")
+        ->check(path);
+    app.add_option("--pag-dot-code", options.pagDotCode, "Show this source file in --pag-dot")
+        ->check(CLI::ExistingFile)
+        ->needs("--pag-dot");
+    app.add_option("--path", options.paths,
+                   "Find a path from:to (an object and a variable: points-to; two variables: "
+                   "alias), print it and draw it in --pag-dot")
+        ->allow_extra_args(false);
+    app.add_option("--lang", options.languages,
+                   "Languages to find each --path in, each on its own: any of D, C, R")
+        ->check([](const std::string& value) {
+            return !value.empty() && value.find_first_not_of("DCR") == std::string::npos
+                       ? ""
+                       : "expects letters of D, C, R";
+        });
+    app.add_option("--dump-pts", options.dumpPts,
+                   "Write the points-to facts with unique object names (`<function>::<name>@<line>` "
+                   "unless labeled) to a file, to compare analyses")
+        ->check(path);
+    app.add_option("--dump-andersen-pts", options.dumpAndersenPts,
+                   "Write SVF's Andersen facts of the same variables, named as --dump-pts")
+        ->check(path);
     try {
         app.parse(argc, argv);
     } catch (const CLI::ParseError& error) { return app.exit(error); }
     if (options.matchCalls) options.pointsTo = true;
     options.svfSolver = solver == "svf";
+    if (!options.pagDot.empty() || !options.paths.empty()) options.pointsTo = true;
+    if (!options.dumpPts.empty() || !options.dumpAndersenPts.empty()) options.pointsTo = true;
     return options;
 }
 

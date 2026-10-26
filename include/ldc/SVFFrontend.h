@@ -2,6 +2,9 @@
 
 #include "ldc/SimplifiedPAG.h"
 #include <cstddef>
+#include <cstdint>
+#include <map>
+#include <set>
 #include <utility>
 
 namespace SVF {
@@ -24,6 +27,9 @@ struct FrontendResult {
     std::size_t svfNodeCount = 0;
     // Sorted, unique caller/callee pairs using LLVM linkage names.
     std::vector<std::pair<std::string, std::string>> calls;
+    // Andersen's points-to sets of the graph's variables, by node index, with an object's fields
+    // folded into the object.
+    std::map<std::uint32_t, std::set<std::uint32_t>> andersen;
 
     void printSummary(std::ostream& out) const;
 };

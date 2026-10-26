@@ -52,4 +52,28 @@ void writeFacts(std::ostream& out, const frontend::SimplifiedPAG& graph, const P
     for (const auto& line : lines) out << line << "\n";
 }
 
+std::vector<std::string> nodeNames(const frontend::SimplifiedPAG& graph, const std::string& source) {
+    return nodeTexts(graph, source);
+}
+
+std::vector<std::string> qualifiedNames(const frontend::SimplifiedPAG& graph,
+                                        const std::string& source) {
+    auto names = nodeTexts(graph, source);
+    const auto labels = lineLabels(source);
+    for (std::size_t id = 0; id < names.size(); ++id) {
+        const auto& node = graph.nodes()[id];
+        if (node.kind == frontend::NodeKind::Obj && !labels.count(node.line))
+            names[id] = functionKey(node.function) + "::" + node.name + "@" +
+                        std::to_string(node.line);
+    }
+    return names;
+}
+
+void writeFacts(std::ostream& out, const std::vector<std::string>& names, const PointsTo& facts) {
+    std::set<std::string> lines;
+    for (const auto& [var, objects] : facts)
+        for (auto object : objects) lines.insert(names[var] + " -> " + names[object]);
+    for (const auto& line : lines) out << line << "\n";
+}
+
 } // namespace ldc

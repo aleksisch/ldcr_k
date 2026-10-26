@@ -16,6 +16,16 @@ struct CommandLine {
     bool matchCalls = false;
     // SVF's CFL solver instead of LAGraph.
     bool svfSolver = false;
+    // The PAG right before solving, as DOT, with this source file at the top right.
+    std::string pagDot;
+    std::string pagDotCode;
+    // `from:to` queries, by the names of --facts, and the languages to find their paths in.
+    std::vector<std::string> paths;
+    std::string languages = "D";
+    // The facts again, and Andersen's (SVF) over the same variables, with every object named
+    // uniquely (Facts.h, qualifiedNames): to compare analyses.
+    std::string dumpPts;
+    std::string dumpAndersenPts;
 };
 
 // Parses the arguments, or prints help or an error and returns the exit code.

@@ -217,6 +217,15 @@ FrontendResult analyzeModules(const std::vector<std::string>& modules) {
     }
     result.calls.assign(calls.begin(), calls.end());
     result.graph = buildSimplifiedPAG(*pag, *andersen->getCallGraph(), result.stats);
+    for (std::uint32_t id = 0; id < result.graph.nodes().size(); ++id) {
+        const auto& node = result.graph.nodes()[id];
+        if (node.kind != NodeKind::Var || !node.svfId) continue;
+        for (const auto object : andersen->getPts(node.svfId->value)) {
+            const auto base = result.graph.findSvf(SvfId{pag->getBaseObjVarID(object)});
+            if (base && result.graph.nodes()[base->value].kind == NodeKind::Obj)
+                result.andersen[id].insert(base->value);
+        }
+    }
     return result;
 }
 

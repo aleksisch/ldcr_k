@@ -33,12 +33,14 @@ target_link_libraries(ldc_cfl PUBLIC ldc_frontend)
 target_sources(ldc_cfl PRIVATE src/Grammar.cpp)
 target_sources(ldc_cfl PRIVATE src/Cfl.cpp src/CflSvf.cpp)
 target_sources(ldc_cfl PRIVATE src/CflLAGraph.cpp)
+target_sources(ldc_cfl PRIVATE src/CflPath.cpp)
 target_link_libraries(ldc_cfl PRIVATE LAGraphX LAGraph SuiteSparse::GraphBLAS)
 
 add_executable(ldc src/main.cpp src/CommandLine.cpp)
 target_link_libraries(ldc PRIVATE ldc_frontend CLI11::CLI11)
 target_sources(ldc PRIVATE src/Facts.cpp)
 target_link_libraries(ldc PRIVATE ldc_cfl)
+target_sources(ldc PRIVATE src/PagDot.cpp)
 
 include(cmake/LdcIR.cmake)
 
