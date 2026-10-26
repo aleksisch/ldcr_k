@@ -1,0 +1,7 @@
+# Both objects have class Doc although their constructor is called through an alias.
+Doc::get::this -> doc
+Doc::get::this -> heap
+main::x -> a1
+main::x -> a2
+main::y -> a1
+main::y -> a2

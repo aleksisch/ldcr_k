@@ -1,0 +1,10 @@
+# The pooled Leaf exists from its constructor call (placement new), so the virtual call on n
+# reaches Leaf::get like the one on the stack object.
+main::n -> pool
+main::n -> pooled
+Leaf::get::this -> leaf
+Leaf::get::this -> pooled
+main::x -> a1
+main::x -> a2
+main::y -> a1
+main::y -> a2
