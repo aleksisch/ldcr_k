@@ -1,9 +1,12 @@
 #pragma once
 
+#include "ldc/Cfl.h"
 #include "ldc/SimplifiedPAG.h"
 
+#include <cstddef>
 #include <set>
 #include <string>
+#include <vector>
 
 namespace ldc {
 
@@ -16,5 +19,13 @@ namespace ldc {
 // The PAG's nodes keep their indices; the copies of `this` come after them.
 frontend::SimplifiedPAG postProcessPAG(const frontend::SimplifiedPAG& pag,
                                        const std::set<std::string>& functions);
+
+// Mutual refinement: solves the languages, keeps the pairs from an object to a variable that all
+// of them reach (at the endpoints), and removes the edges that are not on a path of every language
+// between such a pair, until no edge is removed. The languages take turns, each solved on the PAG
+// the previous ones pruned. A path in all the languages at once keeps its edges, so no fact of
+// their intersection is lost. Returns the number of edges removed.
+std::size_t refinePAG(frontend::SimplifiedPAG& pag, const std::vector<cfl::Language>& languages,
+                      const cfl::Options& options = {});
 
 } // namespace ldc

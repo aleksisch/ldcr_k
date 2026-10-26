@@ -56,6 +56,12 @@ int main(int argc, char** argv) {
         for (const auto node : {e.src.value, e.dst.value})
             if (pag.nodes()[node].kind == ldc::frontend::NodeKind::Var) variables.insert(node);
     auto grammar = ldc::grammar::ldEnriched(pag);
+    if (options.refine) {
+        std::vector<ldc::cfl::Language> all{{grammar, "S"}, {ldc::grammar::lr(), "S"}};
+        if (options.matchCalls) all.push_back({ldc::grammar::lc(), "S"});
+        const auto removed = ldc::refinePAG(pag, all, cfl);
+        std::cout << "Refinement: removed " << removed << " edges\n";
+    }
     // The --path queries: a path in each language on its own, printed and drawn in --pag-dot.
     std::vector<ldc::DrawnPath> drawn;
     std::string legend;

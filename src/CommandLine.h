@@ -22,6 +22,8 @@ struct CommandLine {
     // `from:to` queries, by the names of --facts, and the languages to find their paths in.
     std::vector<std::string> paths;
     std::string languages = "D";
+    // Mutual refinement of the PAG before solving.
+    bool refine = false;
     // The facts again, and Andersen's (SVF) over the same variables, with every object named
     // uniquely (Facts.h, qualifiedNames): to compare analyses.
     std::string dumpPts;

@@ -37,6 +37,9 @@ std::variant<CommandLine, int> parseCommandLine(int argc, char** argv) {
                        ? ""
                        : "expects letters of D, C, R";
         });
+    app.add_flag("--refine", options.refine,
+                 "Refine the PAG first: remove the edges not on a path of every language between "
+                 "the facts they all reach, until none is removed");
     app.add_option("--dump-pts", options.dumpPts,
                    "Write the points-to facts with unique object names (`<function>::<name>@<line>` "
                    "unless labeled) to a file, to compare analyses")
@@ -50,6 +53,7 @@ std::variant<CommandLine, int> parseCommandLine(int argc, char** argv) {
     if (options.matchCalls) options.pointsTo = true;
     options.svfSolver = solver == "svf";
     if (!options.pagDot.empty() || !options.paths.empty()) options.pointsTo = true;
+    if (options.refine) options.pointsTo = true;
     if (!options.dumpPts.empty() || !options.dumpAndersenPts.empty()) options.pointsTo = true;
     return options;
 }
