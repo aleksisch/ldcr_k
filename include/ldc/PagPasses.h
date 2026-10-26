@@ -1,9 +1,12 @@
 #pragma once
 
+#include "ldc/Cfl.h"
 #include "ldc/SimplifiedPAG.h"
 
+#include <cstddef>
 #include <set>
 #include <string>
+#include <vector>
 
 namespace ldc {
 
@@ -22,5 +25,13 @@ frontend::SimplifiedPAG postProcessPAG(const frontend::SimplifiedPAG& pag,
 // at a (f the gep field); a heap cell per object and absolute field, where stores and loads meet;
 // and a hub per object for unknown fields. The added edges are also added reversed.
 void addObjectFields(frontend::SimplifiedPAG& pag);
+
+// Mutual refinement: solves the languages, keeps the pairs from an object to a variable that all
+// of them reach (at the endpoints), and removes the edges that are not on a path of every language
+// between such a pair, until no edge is removed. The languages take turns, each solved on the PAG
+// the previous ones pruned. A path in all the languages at once keeps its edges, so no fact of
+// their intersection is lost. Returns the number of edges removed.
+std::size_t refinePAG(frontend::SimplifiedPAG& pag, const std::vector<cfl::Language>& languages,
+                      const cfl::Options& options = {});
 
 } // namespace ldc

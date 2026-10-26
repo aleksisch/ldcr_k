@@ -24,6 +24,8 @@ struct CommandLine {
     // `from:to` queries, by the names of --facts, and the languages to find their paths in.
     std::vector<std::string> paths;
     std::string languages = "D";
+    // Mutual refinement of the PAG before solving.
+    bool refine = false;
 };
 
 // Parses the arguments, or prints help or an error and returns the exit code.

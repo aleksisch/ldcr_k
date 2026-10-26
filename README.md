@@ -113,6 +113,14 @@ and stores and loads meet in a heap cell per object and absolute field. Pointers
 into the middle of an object then stay field-sensitive; without it they may
 touch any field of their object.
 
+`--refine` refines the PAG first (mutual refinement): it solves the languages,
+keeps the facts they all reach at the endpoints, removes every edge that is not
+on a path of each language between such a fact, and repeats until no edge is
+removed. The languages take turns, L_D first, each on the PAG the previous ones
+pruned: L_D drops most reversed edges, which keeps L_R and L_C small. A path in all the languages at once keeps its edges, so no fact of
+their intersection is lost, while a fact whose languages took different paths
+can lose one of them (tests/cpp/split.cpp, with `--match-calls`).
+
 ## Paths
 
 ```sh

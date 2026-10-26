@@ -1,6 +1,7 @@
 #include "ldc/PagPasses.h"
 
 #include <algorithm>
+#include <iterator>
 #include <map>
 #include <optional>
 #include <utility>
@@ -188,6 +189,46 @@ void addObjectFields(SimplifiedPAG& pag) {
         e.reversed = true;
         pag.addEdge(e);
     }
+}
+
+std::size_t refinePAG(SimplifiedPAG& pag, const std::vector<cfl::Language>& languages,
+                      const cfl::Options& options) {
+    // The languages take turns: each is solved on the graph the previous ones pruned, keeps the
+    // pairs all of them found so far, and drops the edges on none of its paths for those pairs.
+    // A pair lost on a smaller graph stays lost, so the pairs only shrink; a full turn that
+    // removes nothing is the same fixpoint as pruning by all languages at once.
+    std::size_t removed = 0;
+    std::optional<cfl::Pairs> pairs;
+    for (std::size_t turn = 0, quiet = 0; quiet < languages.size(); ++turn) {
+        const auto& language = languages[turn % languages.size()];
+        const auto solved = cfl::solve(pag, language.grammar, options);
+        auto found = solved.at(language.start);
+        std::erase_if(found, [&](const auto& pair) {
+            return pag.nodes()[pair.first].kind != NodeKind::Obj ||
+                   pag.nodes()[pair.second].kind != NodeKind::Var;
+        });
+        std::sort(found.begin(), found.end());
+        found.erase(std::unique(found.begin(), found.end()), found.end());
+        if (pairs) {
+            cfl::Pairs both;
+            std::set_intersection(pairs->begin(), pairs->end(), found.begin(), found.end(),
+                                  std::back_inserter(both));
+            found = std::move(both);
+        }
+        pairs = std::move(found);
+        const auto used = cfl::usedEdges(pag, language.grammar, solved, language.start, *pairs);
+        std::vector<Edge> kept;
+        for (std::size_t e = 0; e < used.size(); ++e)
+            if (used[e]) kept.push_back(pag.edges()[e]);
+        if (kept.size() == pag.edges().size()) {
+            ++quiet;
+            continue;
+        }
+        quiet = 1;
+        removed += pag.edges().size() - kept.size();
+        pag.edges() = std::move(kept);
+    }
+    return removed;
 }
 
 } // namespace ldc

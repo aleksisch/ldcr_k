@@ -52,6 +52,12 @@ int main(int argc, char** argv) {
     if (options.cppHeap) ldc::addObjectFields(pag);
     auto grammar = ldc::grammar::ld(pag);
     if (options.cppHeap) grammar = ldc::grammar::ldCpp(pag);
+    if (options.refine) {
+        std::vector<ldc::cfl::Language> all{{grammar, "S"}, {ldc::grammar::lr(), "S"}};
+        if (options.matchCalls) all.push_back({ldc::grammar::lc(), "S"});
+        const auto removed = ldc::refinePAG(pag, all, cfl);
+        std::cout << "Refinement: removed " << removed << " edges\n";
+    }
     // The --path queries: a path in each language on its own, printed and drawn in --pag-dot.
     std::vector<ldc::DrawnPath> drawn;
     std::string legend;

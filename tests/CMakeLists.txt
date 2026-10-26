@@ -65,3 +65,13 @@ add_test(NAME path.fig8.none
 # --pag-dot draws dead edges: the dispatch edges to `this` that splitDispatchedThis moved to this#c.
 add_test(NAME pag_dot.dead
          COMMAND sh -c "$<TARGET_FILE:ldc> --pag-dot /dev/stdout '${fig8_ir}' | grep -q 'style=dashed, label=\"(dispatch'")
+# With --refine and L_C, where expected/<name>.refine.txt exists.
+foreach(src IN LISTS points_to_sources)
+  get_filename_component(name "${src}" NAME_WE)
+  set(refine "${CMAKE_CURRENT_SOURCE_DIR}/expected/${name}.refine.txt")
+  if(EXISTS "${refine}")
+    set(facts "${CMAKE_CURRENT_BINARY_DIR}/${name}.refine.facts")
+    add_test(NAME "points_to.${name}.refine"
+             COMMAND sh -c "$<TARGET_FILE:ldc> --match-calls --refine --facts '${facts}' --source '${src}' '${CMAKE_CURRENT_BINARY_DIR}/${name}.ll' >/dev/null && sh '${CMAKE_CURRENT_SOURCE_DIR}/expect.sh' '${facts}' '${refine}'")
+  endif()
+endforeach()

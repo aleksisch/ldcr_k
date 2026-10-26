@@ -1,0 +1,5 @@
+# Without L_C, the call through id is not matched.
+main::p -> a1
+main::p -> a2
+main::q -> a1
+main::q -> a2

@@ -40,6 +40,9 @@ std::variant<CommandLine, int> parseCommandLine(int argc, char** argv) {
                        ? ""
                        : "expects letters of D, C, R";
         });
+    app.add_flag("--refine", options.refine,
+                 "Refine the PAG first: remove the edges not on a path of every language between "
+                 "the facts they all reach, until none is removed");
     try {
         app.parse(argc, argv);
     } catch (const CLI::ParseError& error) { return app.exit(error); }
@@ -47,6 +50,7 @@ std::variant<CommandLine, int> parseCommandLine(int argc, char** argv) {
     if (options.cppHeap) options.pointsTo = true;
     options.svfSolver = solver == "svf";
     if (!options.pagDot.empty() || !options.paths.empty()) options.pointsTo = true;
+    if (options.refine) options.pointsTo = true;
     return options;
 }
 

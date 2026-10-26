@@ -1,0 +1,5 @@
+# Endpoint intersection keeps the spurious facts (each language has its own path).
+main::p -> a1
+main::p -> a2
+main::q -> a1
+main::q -> a2

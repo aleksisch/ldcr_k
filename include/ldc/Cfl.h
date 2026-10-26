@@ -69,4 +69,10 @@ std::vector<std::optional<std::vector<std::size_t>>> paths(const frontend::Simpl
                                                            const std::string& start,
                                                            const Pairs& queries);
 
+// For each PAG edge, whether it is on some path u ~> v derived from `start` for a pair (u, v) of
+// `pairs` (the pairs without such a path are skipped); `solved` is solve(pag, grammar).
+std::vector<bool> usedEdges(const frontend::SimplifiedPAG& pag, const Grammar& grammar,
+                            const std::map<std::string, Pairs>& solved, const std::string& start,
+                            const Pairs& pairs);
+
 } // namespace ldc::cfl
