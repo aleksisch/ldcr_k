@@ -37,6 +37,26 @@ SVF was built against, including its `clang++` and `opt`. Build before running
 `test`; the test target does not compile binaries or IR fixtures.
 [CI](.github/workflows/ci.yml) runs the same build and tests.
 
+CFL reachability is solved by [LAGraph](https://github.com/SparseLinearAlgebra/LAGraph)
+(Git submodule) on [SuiteSparse:GraphBLAS](https://github.com/DrTimothyAldenDavis/GraphBLAS).
+Fetch the submodule and build GraphBLAS once, with a C compiler that has OpenMP:
+
+```sh
+git submodule update --init third_party/LAGraph
+git clone --depth=1 --branch v10.5.1 https://github.com/DrTimothyAldenDavis/GraphBLAS.git
+CC=gcc cmake -S GraphBLAS -B GraphBLAS/build -DGRAPHBLAS_COMPACT=1 \
+  -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$HOME/.local/graphblas"
+cmake --build GraphBLAS/build --parallel && cmake --install GraphBLAS/build
+```
+
+Then configure as above with the same C compiler and GraphBLAS:
+
+```sh
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=gcc \
+  -DSVF_DIR="$SVF_DIR" -DLLVM_DIR="$LLVM_DIR" -DZ3_DIR="$Z3_DIR" \
+  -DGraphBLAS_ROOT="$HOME/.local/graphblas"
+```
+
 ## Usage
 
 Compile a source file to LLVM IR, then analyze it:
@@ -58,6 +78,66 @@ The tool prints sorted `call: <caller> -> <callee>` edges using LLVM linkage
 names. DOT output includes pointer-flow edges, call sites, and source metadata.
 GEP chains are folded into load/store field offsets; escaping field addresses
 retain explicit GEP edges.
+
+## Points-to facts
+
+```sh
+build/ldc --points-to example.ll
+build/ldc --facts facts.txt --source example.cpp example.ll
+```
+
+`--points-to` solves field- and dispatch-sensitive points-to facts (L_D, with
+L_R pairing each virtual call's arguments with the instance it dispatched to),
+without calling contexts, as CFL reachability, and prints Σ|pts| over
+variables. `--facts` writes one `var -> obj` line per fact, with variables named
+`<function>::<name>`; `--source` names objects by the `// <label>` comment on
+their allocation line.
+
+`--match-calls` keeps only facts that also have a realizable value-flow path
+(L_C: every return goes back to its call), also solved as CFL reachability. Its
+graph adds every edge reversed, a reversed call being a return, so that a flow
+through the heap can go from a store's base back to the object and on to a
+load's base.
+
+The facts are also intersected with L_R: a fact is kept if it has a path whose
+dispatch excursions close at the call site they opened at and return to the
+calling context they left. Its graph is L_C's, with the start and the end of
+each dispatch marked (the paper's boxed labels): the argument stored into the
+receiver opens, and a second edge from the receiver to its per-site copy, used
+only by arguments, or the result load closes. The languages are intersected at
+the endpoints: each may use its own path.
+
+`--cpp-heap` models C++ memory more closely: every object gets a node per field
+offset its address computations reach (up to SVF's field limit for the object),
+and stores and loads meet in a heap cell per object and absolute field. Pointers
+into the middle of an object then stay field-sensitive; without it they may
+touch any field of their object.
+
+`--refine` refines the PAG first (mutual refinement): it solves the languages,
+keeps the facts they all reach at the endpoints, removes every edge that is not
+on a path of each language between such a fact, and repeats until no edge is
+removed. The languages take turns, L_D first, each on the PAG the previous ones
+pruned: L_D drops most reversed edges, which keeps L_R and L_C small. A path in all the languages at once keeps its edges, so no fact of
+their intersection is lost, while a fact whose languages took different paths
+can lose one of them (tests/cpp/split.cpp, with `--match-calls`).
+
+## Paths
+
+```sh
+build/ldc --pag-dot pag.dot --pag-dot-code example.cpp --path i1:main::p --lang DCR example.ll
+c++filt < pag.dot | dot -Tpng -o pag.png
+```
+
+`--pag-dot` draws the PAG the languages are solved on (without its reversed
+edges), each edge as the tuple of its two labels in the paper, `(store[1], ⟦ĉ3⟧)`;
+`--pag-dot-code` shows the source with line numbers at the top right. The
+frontend's edges that the PAG passes removed (functions not reached from `main`,
+edges moved to `this#c`) are drawn too, gray and dashed.
+`--path from:to` (repeatable) finds a path from an object to a variable
+(points-to) or between two variables (alias), named as in `--facts`, in each
+language of `--lang` on its own (any of D, C, R; D by default). Each path is
+printed and drawn over the PAG: its edges in the query's color, with the
+numbered steps of each language (`D3`, `C2`, `←` for an edge walked backwards).
 
 ## Library
 

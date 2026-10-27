@@ -3,6 +3,13 @@ ldc_compile_ir("${CMAKE_CURRENT_SOURCE_DIR}/fixtures/pointer_flow.cpp" pointer_f
 ldc_compile_ir("${CMAKE_CURRENT_SOURCE_DIR}/fixtures/dispatch.cpp" dispatch_ir)
 add_custom_target(test_ir ALL DEPENDS "${call_graph_ir}" "${pointer_flow_ir}" "${dispatch_ir}")
 
+add_executable(cfl_test cfl_test.cpp)
+target_link_libraries(cfl_test PRIVATE ldc_cfl)
+add_test(NAME cfl COMMAND cfl_test)
+add_executable(grammar_test grammar_test.cpp)
+target_link_libraries(grammar_test PRIVATE ldc_cfl)
+add_test(NAME grammar COMMAND grammar_test)
+
 add_executable(dispatch_test dispatch_test.cpp)
 target_link_libraries(dispatch_test PRIVATE ldc_frontend)
 add_dependencies(dispatch_test test_ir)
@@ -23,4 +30,48 @@ endforeach()
 foreach(flag -stat=false -dump-callgraph -ander --help-svf --unknown --program-dot --program-dot=)
   add_test(NAME "invalid.${flag}" COMMAND ldc "${flag}")
   set_tests_properties("invalid.${flag}" PROPERTIES WILL_FAIL TRUE)
+endforeach()
+
+# Points-to facts of every tests/cpp/*.cpp against expected/<name>.txt.
+file(GLOB points_to_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/cpp/*.cpp")
+set(points_to_ir "")
+foreach(src IN LISTS points_to_sources)
+  get_filename_component(name "${src}" NAME_WE)
+  ldc_compile_ir("${src}" ll)
+  list(APPEND points_to_ir "${ll}")
+  set(facts "${CMAKE_CURRENT_BINARY_DIR}/${name}.facts")
+  add_test(NAME "points_to.${name}"
+           COMMAND sh -c "$<TARGET_FILE:ldc> --facts '${facts}' --source '${src}' '${ll}' >/dev/null && sh '${CMAKE_CURRENT_SOURCE_DIR}/expect.sh' '${facts}' '${CMAKE_CURRENT_SOURCE_DIR}/expected/${name}.txt'")
+  # With calls and returns matched (L_C), where expected/<name>.calls.txt exists.
+  set(calls "${CMAKE_CURRENT_SOURCE_DIR}/expected/${name}.calls.txt")
+  if(EXISTS "${calls}")
+    set(facts "${CMAKE_CURRENT_BINARY_DIR}/${name}.calls.facts")
+    add_test(NAME "points_to.${name}.calls"
+             COMMAND sh -c "$<TARGET_FILE:ldc> --match-calls --facts '${facts}' --source '${src}' '${ll}' >/dev/null && sh '${CMAKE_CURRENT_SOURCE_DIR}/expect.sh' '${facts}' '${calls}'")
+  endif()
+  # With the C++ heap model (--cpp-heap), against the same expected facts.
+  set(facts "${CMAKE_CURRENT_BINARY_DIR}/${name}.cpp_heap.facts")
+  add_test(NAME "points_to.${name}.cpp_heap"
+           COMMAND sh -c "$<TARGET_FILE:ldc> --cpp-heap --facts '${facts}' --source '${src}' '${ll}' >/dev/null && sh '${CMAKE_CURRENT_SOURCE_DIR}/expect.sh' '${facts}' '${CMAKE_CURRENT_SOURCE_DIR}/expected/${name}.txt'")
+endforeach()
+add_custom_target(points_to_ir ALL DEPENDS ${points_to_ir})
+
+# Paths of --path queries: i1 reaches m's p in each language, i2 does not in L_D.
+set(fig8_ir "${CMAKE_CURRENT_BINARY_DIR}/fig8.ll")
+add_test(NAME path.fig8
+         COMMAND sh -c "$<TARGET_FILE:ldc> --pag-dot '${CMAKE_CURRENT_BINARY_DIR}/fig8.pag.dot' --pag-dot-code '${CMAKE_CURRENT_SOURCE_DIR}/cpp/fig8.cpp' --path i1:H::m::p --lang DCR '${fig8_ir}' | grep -c ' in L_[DCR]:$' | grep -qx 3")
+add_test(NAME path.fig8.none
+         COMMAND sh -c "$<TARGET_FILE:ldc> --pag-dot-code '${CMAKE_CURRENT_SOURCE_DIR}/cpp/fig8.cpp' --pag-dot /dev/null --path i2:H::m::p '${fig8_ir}' | grep -qx 'Path i2:H::m::p in L_D: none'")
+# --pag-dot draws dead edges: the dispatch edges to `this` that splitDispatchedThis moved to this#c.
+add_test(NAME pag_dot.dead
+         COMMAND sh -c "$<TARGET_FILE:ldc> --pag-dot /dev/stdout '${fig8_ir}' | grep -q 'style=dashed, label=\"(dispatch'")
+# With --refine and L_C, where expected/<name>.refine.txt exists.
+foreach(src IN LISTS points_to_sources)
+  get_filename_component(name "${src}" NAME_WE)
+  set(refine "${CMAKE_CURRENT_SOURCE_DIR}/expected/${name}.refine.txt")
+  if(EXISTS "${refine}")
+    set(facts "${CMAKE_CURRENT_BINARY_DIR}/${name}.refine.facts")
+    add_test(NAME "points_to.${name}.refine"
+             COMMAND sh -c "$<TARGET_FILE:ldc> --match-calls --refine --facts '${facts}' --source '${src}' '${CMAKE_CURRENT_BINARY_DIR}/${name}.ll' >/dev/null && sh '${CMAKE_CURRENT_SOURCE_DIR}/expect.sh' '${facts}' '${refine}'")
+  endif()
 endforeach()

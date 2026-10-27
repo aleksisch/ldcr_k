@@ -1,0 +1,3 @@
+# set() and get() store and load through b1 at c1/c3 and through b2 at c2/c4.
+main::r1 -> o1
+main::r2 -> o2

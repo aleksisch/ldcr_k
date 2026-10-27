@@ -1,0 +1,3 @@
+# Refinement removes the stores, which only L_C used: the exact L_DC facts.
+main::p -> a1
+main::q -> a2

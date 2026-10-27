@@ -14,6 +14,7 @@ namespace ldc::frontend {
 struct BuildStats {
     std::size_t variantGeps = 0;
     std::size_t skippedEdges = 0;
+    std::size_t nonPointerEdges = 0;
     std::size_t indirectEdges = 0;
 };
 
