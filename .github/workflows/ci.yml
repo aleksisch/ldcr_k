@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Native CMake build and test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CTEST_OUTPUT_ON_FAILURE: '1'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Set dependency directory
+        run: echo "LDCR_DEPS=$RUNNER_TEMP/ldcr-deps" >> "$GITHUB_ENV"
+
+      - name: Install build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build git curl wget unzip xz-utils \
+            libncurses-dev zlib1g-dev libzstd-dev libffi-dev libxml2-dev libcli11-dev
+
+      - name: Cache native SVF toolchain
+        id: svf-cache
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ${{ env.LDCR_DEPS }}
+          key: prebuilt-svf-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('scripts/setup-deps.sh') }}
+
+      - name: Install prebuilt SVF, LLVM, and Z3
+        if: steps.svf-cache.outputs.cache-hit != 'true'
+        run: bash scripts/setup-deps.sh "$LDCR_DEPS"
+
+      - name: Configure dependency paths
+        run: |
+          source "$LDCR_DEPS/env.sh"
+          echo "SVF_DIR=$SVF_DIR" >> "$GITHUB_ENV"
+          echo "LLVM_DIR=$LLVM_DIR" >> "$GITHUB_ENV"
+          echo "Z3_DIR=$Z3_DIR" >> "$GITHUB_ENV"
+          echo "$LDCR_DEPS/llvm-21.1.0/bin" >> "$GITHUB_PATH"
+          echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> "$GITHUB_ENV"
+
+      - name: Configure
+        run: >-
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DSVF_DIR="$SVF_DIR" -DLLVM_DIR="$LLVM_DIR" -DZ3_DIR="$Z3_DIR"
+
+      - name: Build all targets and fixtures
+        run: cmake --build build --parallel 2
+
+      - name: Run all tests
+        run: cmake --build build --target test
