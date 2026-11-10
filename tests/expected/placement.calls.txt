@@ -1,0 +1,7 @@
+# Calls and returns matched: each virtual call returns the field of its own receiver.
+main::n -> pool
+main::n -> pooled
+Leaf::get::this -> leaf
+Leaf::get::this -> pooled
+main::x -> a1
+main::y -> a2

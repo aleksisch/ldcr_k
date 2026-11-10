@@ -142,12 +142,23 @@ private:
         return id;
     }
 
+    static bool pointer(const SVFVar* var) {
+        if (SVFUtil::isa<ObjVar>(var) || SVFUtil::isa<VarArgValPN>(var)) return true;
+        return var->getType() && var->isPointer();
+    }
+
     void add(const SvfEdges& edges) {
         for (const auto& edge : edges) {
             const auto site =
                 edge.site ? std::optional<CallSiteId>(callSite(edge.site)) : std::nullopt;
             if (!relevant(edge.src) || !relevant(edge.dst)) {
                 ++stats_.skippedEdges;
+                continue;
+            }
+            // As SVF's Andersen: a value that is no pointer (an integer, also one cast to or from
+            // a pointer) carries no object.
+            if (!pointer(edge.src) || !pointer(edge.dst)) {
+                ++stats_.nonPointerEdges;
                 continue;
             }
             const auto src = node(edge.src);
@@ -179,6 +190,7 @@ void FrontendResult::printSummary(std::ostream& out) const {
     graph.printSummary(out);
     out << "Build: " << stats.variantGeps << " variable-offset geps, " << stats.skippedEdges
         << " skipped edges, " << stats.indirectEdges << " indirect call/return edges\n";
+    out << "Non-pointer edges dropped: " << stats.nonPointerEdges << "\n";
 }
 
 FrontendResult analyzeModules(const std::vector<std::string>& modules) {
@@ -205,6 +217,15 @@ FrontendResult analyzeModules(const std::vector<std::string>& modules) {
     }
     result.calls.assign(calls.begin(), calls.end());
     result.graph = buildSimplifiedPAG(*pag, *andersen->getCallGraph(), result.stats);
+    for (std::uint32_t id = 0; id < result.graph.nodes().size(); ++id) {
+        const auto& node = result.graph.nodes()[id];
+        if (node.kind != NodeKind::Var || !node.svfId) continue;
+        for (const auto object : andersen->getPts(node.svfId->value)) {
+            const auto base = result.graph.findSvf(SvfId{pag->getBaseObjVarID(object)});
+            if (base && result.graph.nodes()[base->value].kind == NodeKind::Obj)
+                result.andersen[id].insert(base->value);
+        }
+    }
     return result;
 }
 

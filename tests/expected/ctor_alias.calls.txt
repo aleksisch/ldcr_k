@@ -1,0 +1,5 @@
+# Calls and returns matched: each virtual call returns the field of its own receiver.
+Doc::get::this -> doc
+Doc::get::this -> heap
+main::x -> a1
+main::y -> a2
